@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "ADHD Task Manager",
+    "slug": "adhd-task-manager",
+    "version": "1.0.0",
+    "main": "App.native.tsx",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#9333ea",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adhd.taskmanager"
+    },
+    "android": {
+      "package": "com.adhd.taskmanager"
+    }
+  }
+}
+
