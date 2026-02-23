@@ -308,24 +308,6 @@ export default function App() {
             </Tab.Screen>
 
             <Tab.Screen
-              name="Buddy"
-              options={{
-                tabBarIcon: ({ color, size }) => (
-                  <Ionicons name="chatbubble-ellipses-outline" size={size} color={color} />
-                ),
-              }}
-            >
-              {() => (
-                <AvatarCompanion
-                  tasks={tasks}
-                  onToggleSubtask={toggleSubtask}
-                  onAddSubtask={addSubtask}
-                  gameState={gameState}
-                />
-              )}
-            </Tab.Screen>
-
-            <Tab.Screen
               name="Stats"
               options={{
                 tabBarIcon: ({ color, size }) => (

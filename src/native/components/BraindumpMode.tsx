@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
@@ -24,20 +24,20 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
-  
+
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
   const isTranscribingRef = useRef(false);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check permissions and API configuration
+  // ✅ guard against double “Create Tasks” presses / queued taps
+  const processingRef = useRef(false);
+
   useEffect(() => {
     (async () => {
       const permission = await requestMicrophonePermission();
       setHasPermission(permission);
-      if (!permission) {
-        setError('Microphone permission is required for voice input.');
-      }
+      if (!permission) setError('Microphone permission is required for voice input.');
     })();
 
     const apiConfigured = isTranscriptionAvailable();
@@ -47,25 +47,17 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     }
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (recordingRef.current) {
-        recordingRef.current.stopAndUnloadAsync().catch(() => {
-          // Ignore cleanup errors
-        });
+        recordingRef.current.stopAndUnloadAsync().catch(() => {});
       }
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-      }
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
     };
   }, []);
 
-  // Process transcription queue
-  const processTranscriptionQueue = async () => {
-    if (isTranscribingRef.current || transcriptionQueueRef.current.length === 0) {
-      return;
-    }
+  const processTranscriptionQueue = useCallback(async () => {
+    if (isTranscribingRef.current || transcriptionQueueRef.current.length === 0) return;
 
     isTranscribingRef.current = true;
     setIsTranscribing(true);
@@ -75,29 +67,22 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       if (!uri) continue;
 
       try {
-        // Transcribe directly from URI (React Native FormData handles URIs)
         const transcribedText = await transcribeAudio(uri);
-        
         if (transcribedText.trim()) {
-          setTranscript((prev) => {
+          setTranscript(prev => {
             const newText = prev ? `${prev} ${transcribedText}` : transcribedText;
             return newText.trim();
           });
         }
       } catch (err) {
         console.error('Transcription error:', err);
-        if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('Failed to transcribe audio. Please try again.');
-        }
-        // Don't stop recording on transcription error
+        setError(err instanceof Error ? err.message : 'Failed to transcribe audio. Please try again.');
       }
     }
 
     isTranscribingRef.current = false;
     setIsTranscribing(false);
-  };
+  }, []);
 
   const handleStartRecording = async () => {
     if (hasPermission === false) {
@@ -127,37 +112,25 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       recordingRef.current = recording;
       setIsRecording(true);
 
-      // Record in chunks (every 4 seconds) and transcribe
       recordingIntervalRef.current = setInterval(async () => {
         if (recordingRef.current && !isTranscribingRef.current) {
           try {
-            // Stop current recording
             const uri = await stopRecording(recordingRef.current);
-            
-            // Add to transcription queue
+
             transcriptionQueueRef.current.push(uri);
-            
-            // Start new recording
+
             const newRecording = await startRecording();
             recordingRef.current = newRecording;
-            
-            // Process queue if not already processing
-            if (!isTranscribingRef.current) {
-              processTranscriptionQueue();
-            }
+
+            if (!isTranscribingRef.current) processTranscriptionQueue();
           } catch (err) {
             console.error('Error in recording interval:', err);
-            // Continue recording even if chunk processing fails
           }
         }
-      }, 4000); // 4 second chunks
+      }, 4000);
     } catch (err) {
       console.error('Error starting recording:', err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Failed to start recording. Please try again.');
-      }
+      setError(err instanceof Error ? err.message : 'Failed to start recording. Please try again.');
       setIsRecording(false);
     }
   };
@@ -169,53 +142,50 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     }
 
     try {
-      // Clear interval
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
         recordingIntervalRef.current = null;
       }
 
-      // Stop recording and get final audio
       const finalUri = await stopRecording(recordingRef.current);
       recordingRef.current = null;
       setIsRecording(false);
 
-      // Transcribe final chunk
       if (finalUri) {
         setIsTranscribing(true);
         try {
           const finalTranscript = await transcribeAudio(finalUri);
-          
           if (finalTranscript.trim()) {
-            setTranscript((prev) => {
+            setTranscript(prev => {
               const newText = prev ? `${prev} ${finalTranscript}` : finalTranscript;
               return newText.trim();
             });
           }
         } catch (err) {
           console.error('Final transcription error:', err);
-          // Don't show error for final transcription
         } finally {
           setIsTranscribing(false);
         }
       }
 
-      // Process any remaining chunks in queue
       await processTranscriptionQueue();
     } catch (err) {
       console.error('Error stopping recording:', err);
-      if (err instanceof Error) {
-        setError(err.message);
-      }
+      if (err instanceof Error) setError(err.message);
       setIsRecording(false);
     }
   };
 
+  // ✅ LOGIC SAME, but with a guard to prevent double creation
   const parseAndCreateTasks = (text: string) => {
+    if (processingRef.current) return; // ✅ prevents “doubles”
+    processingRef.current = true;
+
     setIsProcessing(true);
-    
+
     setTimeout(() => {
       const tasks: Task[] = [];
+
       const segments = text.toLowerCase()
         .split(/(?:and also|also|and|oh and|maybe|,|;)/)
         .map(s => s.trim())
@@ -224,8 +194,8 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       segments.forEach((segment) => {
         const taskId = Date.now().toString() + Math.random();
         let title = segment.charAt(0).toUpperCase() + segment.slice(1);
-        const subtasks = [];
-        
+        const subtasks: { id: string; text: string; completed: boolean }[] = [];
+
         if (segment.includes('clean')) {
           title = 'Clean room';
           subtasks.push(
@@ -276,8 +246,11 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       });
 
       onTasksCreated(tasks);
+
       setIsProcessing(false);
       setTranscript('');
+
+      processingRef.current = false; // ✅ release
     }, 1500);
   };
 
@@ -300,14 +273,11 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       <View style={styles.avatarCard}>
         <CuteAvatar mood={getAvatarMood()} size="md" />
         <View style={styles.messageBox}>
-          <Text style={styles.messageText}>
-            {getAvatarMessage()}
-          </Text>
+          <Text style={styles.messageText}>{getAvatarMessage()}</Text>
         </View>
       </View>
 
-      {/* Error Message */}
-      {error && (
+      {!!error && (
         <View style={styles.errorCard}>
           <View style={styles.errorContent}>
             <Ionicons name="alert-circle" size={20} color="#ef4444" />
@@ -321,37 +291,26 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         </View>
       )}
 
-      {/* Permission Warning */}
       {hasPermission === false && (
         <View style={styles.warningCard}>
           <Ionicons name="warning" size={20} color="#f59e0b" />
           <View style={styles.warningTextContainer}>
-            <Text style={styles.warningText}>
-              Microphone permission is required for voice input.
-            </Text>
-            <Text style={styles.warningSubtext}>
-              Please enable it in your device settings.
-            </Text>
+            <Text style={styles.warningText}>Microphone permission is required for voice input.</Text>
+            <Text style={styles.warningSubtext}>Please enable it in your device settings.</Text>
           </View>
         </View>
       )}
 
-      {/* API Configuration Warning */}
       {!isApiConfigured && (
         <View style={styles.warningCard}>
           <Ionicons name="warning" size={20} color="#f59e0b" />
           <View style={styles.warningTextContainer}>
-            <Text style={styles.warningText}>
-              Google Cloud API key is not configured.
-            </Text>
-            <Text style={styles.warningSubtext}>
-              Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.
-            </Text>
+            <Text style={styles.warningText}>Google Cloud API key is not configured.</Text>
+            <Text style={styles.warningSubtext}>Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.</Text>
           </View>
         </View>
       )}
 
-      {/* Transcribing Indicator */}
       {isTranscribing && (
         <View style={styles.infoCard}>
           <ActivityIndicator size="small" color="#3b82f6" />
@@ -359,19 +318,17 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         </View>
       )}
 
+      {/* Mic Card (boxed + centered) */}
       <View style={styles.voiceCard}>
         <TouchableOpacity
           style={[styles.recordButton, isRecording && styles.recordButtonActive]}
           onPress={isRecording ? handleStopRecording : handleStartRecording}
           disabled={isProcessing || hasPermission === false || !isApiConfigured}
+          activeOpacity={0.9}
         >
-          <Ionicons 
-            name={isRecording ? "mic-off" : "mic"} 
-            size={40} 
-            color="#fff" 
-          />
+          <Ionicons name={isRecording ? "mic-off" : "mic"} size={40} color="#fff" />
         </TouchableOpacity>
-        
+
         <Text style={styles.recordLabel}>
           {isRecording ? 'Listening...' : 'Tap to start braindump'}
         </Text>
@@ -379,13 +336,10 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           Say whatever's on your mind. No structure needed.
         </Text>
 
-        {/* Live transcript preview while recording */}
         {transcript && isRecording && (
           <View style={styles.liveTranscript}>
             <Text style={styles.liveTranscriptText}>{transcript}</Text>
-            {isTranscribing && (
-              <Text style={styles.liveTranscriptInterim}>Transcribing...</Text>
-            )}
+            {isTranscribing && <Text style={styles.liveTranscriptInterim}>Transcribing...</Text>}
           </View>
         )}
       </View>
@@ -395,19 +349,23 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           <View style={styles.transcriptContent}>
             <Text style={styles.transcriptText}>"{transcript}"</Text>
           </View>
+
           <View style={styles.transcriptActions}>
             <TouchableOpacity
-              style={[styles.createButton, styles.createButtonPrimary]}
+              style={[styles.createButton, styles.createButtonPrimary, isProcessing && styles.buttonDisabled]}
               onPress={() => parseAndCreateTasks(transcript)}
+              disabled={isProcessing}
+              activeOpacity={0.9}
             >
               <Ionicons name="sparkles" size={20} color="#fff" />
               <Text style={styles.createButtonText}>Create Tasks</Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.createButton, styles.createButtonSecondary]}
-              onPress={() => {
-                setTranscript('');
-              }}
+              onPress={() => setTranscript('')}
+              disabled={isProcessing}
+              activeOpacity={0.9}
             >
               <Text style={styles.clearButtonText}>Clear</Text>
             </TouchableOpacity>
@@ -419,14 +377,9 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f9fafb',
-  },
-  content: {
-    padding: 16,
-    gap: 16,
-  },
+  container: { flex: 1, backgroundColor: '#f9fafb' },
+  content: { padding: 16, gap: 16 },
+
   avatarCard: {
     backgroundColor: '#ede9fe',
     borderRadius: 16,
@@ -435,16 +388,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  messageBox: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 12,
-  },
-  messageText: {
-    fontSize: 14,
-    color: '#1f2937',
-  },
+  messageBox: { flex: 1, backgroundColor: '#fff', borderRadius: 16, padding: 12 },
+  messageText: { fontSize: 14, color: '#1f2937' },
+
   voiceCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -465,25 +411,30 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  recordButtonActive: {
-    backgroundColor: '#ef4444',
+  recordButtonActive: { backgroundColor: '#ef4444' },
+  recordLabel: { fontSize: 18, fontWeight: '600', color: '#1f2937' },
+  recordHint: { fontSize: 14, color: '#6b7280', textAlign: 'center' },
+
+  transcriptCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, gap: 12 },
+  transcriptContent: { marginBottom: 12 },
+  transcriptText: { fontSize: 16, color: '#374151', fontStyle: 'italic' },
+
+  transcriptActions: { flexDirection: 'row', gap: 8 },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    flex: 1,
   },
-  recordLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  recordHint: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  transcriptCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
+  createButtonPrimary: { backgroundColor: '#9333ea' },
+  createButtonSecondary: { backgroundColor: '#f3f4f6' },
+  createButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  clearButtonText: { color: '#6b7280', fontSize: 16, fontWeight: '600' },
+  buttonDisabled: { opacity: 0.6 },
+
   errorCard: {
     backgroundColor: '#fef2f2',
     borderWidth: 1,
@@ -491,25 +442,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 12,
   },
-  errorContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  errorTextContainer: {
-    flex: 1,
-  },
-  errorText: {
-    fontSize: 14,
-    color: '#991b1b',
-    fontWeight: '500',
-  },
-  errorDismiss: {
-    fontSize: 12,
-    color: '#dc2626',
-    marginTop: 4,
-    textDecorationLine: 'underline',
-  },
+  errorContent: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  errorTextContainer: { flex: 1 },
+  errorText: { fontSize: 14, color: '#991b1b', fontWeight: '500' },
+  errorDismiss: { fontSize: 12, color: '#dc2626', marginTop: 4, textDecorationLine: 'underline' },
+
   warningCard: {
     backgroundColor: '#fffbeb',
     borderWidth: 1,
@@ -520,19 +457,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
-  warningTextContainer: {
-    flex: 1,
-  },
-  warningText: {
-    fontSize: 14,
-    color: '#92400e',
-    fontWeight: '500',
-  },
-  warningSubtext: {
-    fontSize: 12,
-    color: '#a16207',
-    marginTop: 4,
-  },
+  warningTextContainer: { flex: 1 },
+  warningText: { fontSize: 14, color: '#92400e', fontWeight: '500' },
+  warningSubtext: { fontSize: 12, color: '#a16207', marginTop: 4 },
+
   infoCard: {
     backgroundColor: '#eff6ff',
     borderWidth: 1,
@@ -543,10 +471,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  infoText: {
-    fontSize: 14,
-    color: '#1e40af',
-  },
+  infoText: { fontSize: 14, color: '#1e40af' },
+
   liveTranscript: {
     marginTop: 16,
     padding: 12,
@@ -555,52 +481,6 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     width: '100%',
   },
-  liveTranscriptText: {
-    fontSize: 14,
-    color: '#374151',
-    fontStyle: 'italic',
-  },
-  liveTranscriptInterim: {
-    fontSize: 14,
-    color: '#9ca3af',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  transcriptContent: {
-    marginBottom: 12,
-  },
-  transcriptText: {
-    fontSize: 16,
-    color: '#374151',
-    fontStyle: 'italic',
-  },
-  transcriptActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  createButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    flex: 1,
-  },
-  createButtonPrimary: {
-    backgroundColor: '#9333ea',
-  },
-  createButtonSecondary: {
-    backgroundColor: '#f3f4f6',
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  clearButtonText: {
-    color: '#6b7280',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  liveTranscriptText: { fontSize: 14, color: '#374151', fontStyle: 'italic' },
+  liveTranscriptInterim: { fontSize: 14, color: '#9ca3af', fontStyle: 'italic', marginTop: 4 },
 });
