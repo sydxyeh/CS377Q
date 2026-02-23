@@ -3,7 +3,7 @@
     "name": "ADHD Task Manager",
     "slug": "adhd-task-manager",
     "version": "1.0.0",
-    "main": "App.native.tsx",
+    "main": "index.js",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
@@ -15,11 +15,25 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.adhd.taskmanager"
+      "bundleIdentifier": "com.adhd.taskmanager",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone to transcribe your voice braindumps."
+      }
     },
     "android": {
-      "package": "com.adhd.taskmanager"
-    }
+      "package": "com.adhd.taskmanager",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow access to microphone for voice input"
+        }
+      ]
+    ]
   }
 }
 

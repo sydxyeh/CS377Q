@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, StatusBar, Platform } from 'react-native';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import { StyleSheet, View, StatusBar, Platform, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
@@ -11,6 +11,47 @@ import TaskList from './src/native/components/TaskList';
 import AvatarCompanion from './src/native/components/AvatarCompanion';
 import GameStats from './src/native/components/GameStats';
 import Header from './src/native/components/Header';
+
+// Error Boundary Component
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={errorStyles.container}>
+          <ScrollView contentContainerStyle={errorStyles.content}>
+            <Text style={errorStyles.title}>Something went wrong</Text>
+            <Text style={errorStyles.message}>
+              {this.state.error?.message || 'An unexpected error occurred'}
+            </Text>
+            <Text style={errorStyles.stack}>
+              {this.state.error?.stack}
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export interface Subtask {
   id: string;
@@ -216,86 +257,88 @@ export default function App() {
   };
 
   return (
-    <NavigationContainer>
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="dark-content" />
-        <Header gameState={gameState} />
-        <Tab.Navigator
-          screenOptions={{
-            headerShown: false,
-            tabBarActiveTintColor: '#9333ea',
-            tabBarInactiveTintColor: '#6b7280',
-            tabBarStyle: {
-              backgroundColor: '#ffffff',
-              borderTopWidth: 1,
-              borderTopColor: '#e5e7eb',
-              paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-              height: Platform.OS === 'ios' ? 90 : 70,
-            },
-          }}
-        >
-          <Tab.Screen
-            name="Braindump"
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="bulb-outline" size={size} color={color} />
-              ),
+    <ErrorBoundary>
+      <NavigationContainer>
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <StatusBar barStyle="dark-content" />
+          <Header gameState={gameState} />
+          <Tab.Navigator
+            screenOptions={{
+              headerShown: false,
+              tabBarActiveTintColor: '#9333ea',
+              tabBarInactiveTintColor: '#6b7280',
+              tabBarStyle: {
+                backgroundColor: '#ffffff',
+                borderTopWidth: 1,
+                borderTopColor: '#e5e7eb',
+                paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+                height: Platform.OS === 'ios' ? 90 : 70,
+              },
             }}
           >
-            {() => <BraindumpMode onTasksCreated={addTasks} gameState={gameState} />}
-          </Tab.Screen>
-          
-          <Tab.Screen
-            name="Tasks"
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="list-outline" size={size} color={color} />
-              ),
-            }}
-          >
-            {() => (
-              <TaskList
-                tasks={tasks}
-                onToggleSubtask={toggleSubtask}
-                onAddSubtask={addSubtask}
-                onDeleteTask={deleteTask}
-                onUpdateTask={updateTask}
-                gameState={gameState}
-              />
-            )}
-          </Tab.Screen>
+            <Tab.Screen
+              name="Braindump"
+              options={{
+                tabBarIcon: ({ color, size }) => (
+                  <Ionicons name="bulb-outline" size={size} color={color} />
+                ),
+              }}
+            >
+              {() => <BraindumpMode onTasksCreated={addTasks} gameState={gameState} />}
+            </Tab.Screen>
+            
+            <Tab.Screen
+              name="Tasks"
+              options={{
+                tabBarIcon: ({ color, size }) => (
+                  <Ionicons name="list-outline" size={size} color={color} />
+                ),
+              }}
+            >
+              {() => (
+                <TaskList
+                  tasks={tasks}
+                  onToggleSubtask={toggleSubtask}
+                  onAddSubtask={addSubtask}
+                  onDeleteTask={deleteTask}
+                  onUpdateTask={updateTask}
+                  gameState={gameState}
+                />
+              )}
+            </Tab.Screen>
 
-          <Tab.Screen
-            name="Buddy"
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="chatbubble-ellipses-outline" size={size} color={color} />
-              ),
-            }}
-          >
-            {() => (
-              <AvatarCompanion
-                tasks={tasks}
-                onToggleSubtask={toggleSubtask}
-                onAddSubtask={addSubtask}
-                gameState={gameState}
-              />
-            )}
-          </Tab.Screen>
+            <Tab.Screen
+              name="Buddy"
+              options={{
+                tabBarIcon: ({ color, size }) => (
+                  <Ionicons name="chatbubble-ellipses-outline" size={size} color={color} />
+                ),
+              }}
+            >
+              {() => (
+                <AvatarCompanion
+                  tasks={tasks}
+                  onToggleSubtask={toggleSubtask}
+                  onAddSubtask={addSubtask}
+                  gameState={gameState}
+                />
+              )}
+            </Tab.Screen>
 
-          <Tab.Screen
-            name="Stats"
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="trophy-outline" size={size} color={color} />
-              ),
-            }}
-          >
-            {() => <GameStats gameState={gameState} tasks={tasks} />}
-          </Tab.Screen>
-        </Tab.Navigator>
-      </SafeAreaView>
-    </NavigationContainer>
+            <Tab.Screen
+              name="Stats"
+              options={{
+                tabBarIcon: ({ color, size }) => (
+                  <Ionicons name="trophy-outline" size={size} color={color} />
+                ),
+              }}
+            >
+              {() => <GameStats gameState={gameState} tasks={tasks} />}
+            </Tab.Screen>
+          </Tab.Navigator>
+        </SafeAreaView>
+      </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 
@@ -303,6 +346,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',
+  },
+});
+
+const errorStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#dc2626',
+    marginBottom: 10,
+  },
+  message: {
+    fontSize: 16,
+    color: '#374151',
+    marginBottom: 20,
+  },
+  stack: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
 });
 
