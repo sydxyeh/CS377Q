@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
-import type { Task, GameState } from '../../../App.native';
+import type { Task, GameState, Subtask } from '../../../App.native';
 import CuteAvatar from './CuteAvatar';
 import {
   requestMicrophonePermission,
@@ -16,6 +16,45 @@ interface BraindumpModeProps {
   gameState: GameState;
 }
 
+function AddSubtaskRow({ taskId, onAdd }: { taskId: string; onAdd: (taskId: string, text: string) => void }) {
+  const [text, setText] = useState('');
+  const handleAdd = () => {
+    onAdd(taskId, text);
+    setText('');
+  };
+  return (
+    <View style={reviewStyles.addSubtaskRow}>
+      <TextInput
+        style={reviewStyles.addSubtaskInput}
+        value={text}
+        onChangeText={setText}
+        placeholder="+ Add subtask"
+        placeholderTextColor="#9ca3af"
+        onSubmitEditing={handleAdd}
+        returnKeyType="done"
+      />
+      <TouchableOpacity style={reviewStyles.addSubtaskButton} onPress={handleAdd} disabled={!text.trim()}>
+        <Ionicons name="add-circle" size={24} color={text.trim() ? '#9333ea' : '#d1d5db'} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const reviewStyles = StyleSheet.create({
+  addSubtaskRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  addSubtaskInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#374151',
+  },
+  addSubtaskButton: { padding: 4 },
+});
+
 export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpModeProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -24,6 +63,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
+  const [reviewTasks, setReviewTasks] = useState<Task[] | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
@@ -245,13 +285,60 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         });
       });
 
-      onTasksCreated(tasks);
-
+      setReviewTasks(JSON.parse(JSON.stringify(tasks)));
       setIsProcessing(false);
-      setTranscript('');
-
       processingRef.current = false; // ✅ release
     }, 1500);
+  };
+
+  const updateReviewTask = (taskId: string, updates: Partial<Pick<Task, 'title'>> & { subtasks?: Subtask[] }) => {
+    setReviewTasks(prev => prev ? prev.map(t => t.id === taskId ? { ...t, ...updates } : t) : null);
+  };
+
+  const addReviewSubtask = (taskId: string, text: string) => {
+    if (!text.trim()) return;
+    setReviewTasks(prev => {
+      if (!prev) return null;
+      return prev.map(t => {
+        if (t.id !== taskId) return t;
+        const newSub: Subtask = { id: `${taskId}_${Date.now()}`, text: text.trim(), completed: false };
+        return { ...t, subtasks: [...t.subtasks, newSub] };
+      });
+    });
+  };
+
+  const updateReviewSubtask = (taskId: string, subtaskId: string, text: string) => {
+    setReviewTasks(prev => prev ? prev.map(t => {
+      if (t.id !== taskId) return t;
+      return { ...t, subtasks: t.subtasks.map(s => s.id === subtaskId ? { ...s, text } : s) };
+    }) : null);
+  };
+
+  const removeReviewSubtask = (taskId: string, subtaskId: string) => {
+    setReviewTasks(prev => prev ? prev.map(t => {
+      if (t.id !== taskId) return t;
+      return { ...t, subtasks: t.subtasks.filter(s => s.id !== subtaskId) };
+    }) : null);
+  };
+
+  const confirmReviewTasks = () => {
+    if (reviewTasks && reviewTasks.length > 0) {
+      const toAdd: Task[] = reviewTasks.map((t) => ({
+        id: String(t.id),
+        title: String(t.title ?? ''),
+        subtasks: Array.isArray(t.subtasks)
+          ? t.subtasks.map((s) => ({ id: String(s.id), text: String(s.text ?? ''), completed: Boolean(s.completed) }))
+          : [],
+        createdAt: new Date(),
+      }));
+      onTasksCreated(toAdd);
+    }
+    setReviewTasks(null);
+    setTranscript('');
+  };
+
+  const cancelReviewTasks = () => {
+    setReviewTasks(null);
   };
 
   const getAvatarMood = () => {
@@ -372,6 +459,63 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           </View>
         </View>
       )}
+
+      <Modal
+        visible={reviewTasks !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={cancelReviewTasks}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Do these tasks look good?</Text>
+            <Text style={styles.modalSubtitle}>Edit titles or add subtasks, then add them to your list.</Text>
+
+            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {reviewTasks?.map((task) => (
+                <View key={task.id} style={styles.reviewTaskCard}>
+                  <TextInput
+                    style={styles.reviewTaskTitleInput}
+                    value={task.title}
+                    onChangeText={(title) => updateReviewTask(task.id, { title })}
+                    placeholder="Task title"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  {task.subtasks.map((sub) => (
+                    <View key={sub.id} style={styles.reviewSubtaskRow}>
+                      <TextInput
+                        style={styles.reviewSubtaskInput}
+                        value={sub.text}
+                        onChangeText={(text) => updateReviewSubtask(task.id, sub.id, text)}
+                        placeholder="Subtask"
+                        placeholderTextColor="#9ca3af"
+                      />
+                      <TouchableOpacity onPress={() => removeReviewSubtask(task.id, sub.id)} style={styles.reviewSubtaskRemove}>
+                        <Ionicons name="close-circle" size={22} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <AddSubtaskRow taskId={task.id} onAdd={addReviewSubtask} styles={styles} />
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalButtonSecondary} onPress={cancelReviewTasks} activeOpacity={0.9}>
+                <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalButtonPrimary} onPress={confirmReviewTasks} activeOpacity={0.9}>
+                <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                <Text style={styles.modalButtonPrimaryText}>Add to my tasks</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ScrollView>
   );
 }
@@ -483,4 +627,86 @@ const styles = StyleSheet.create({
   },
   liveTranscriptText: { fontSize: 14, color: '#374151', fontStyle: 'italic' },
   liveTranscriptInterim: { fontSize: 14, color: '#9ca3af', fontStyle: 'italic', marginTop: 4 },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '85%',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 32,
+  },
+  modalTitle: { fontSize: 20, fontWeight: '700', color: '#1f2937', marginBottom: 4 },
+  modalSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
+  modalScroll: { maxHeight: 400 },
+  addSubtaskRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  addSubtaskInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#374151',
+  },
+  addSubtaskButton: { padding: 4 },
+  reviewTaskCard: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  reviewTaskTitleInput: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  reviewSubtaskRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  reviewSubtaskInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#374151',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  reviewSubtaskRemove: { padding: 4 },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  modalButtonPrimary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#9333ea',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  modalButtonSecondary: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  modalButtonPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  modalButtonSecondaryText: { color: '#6b7280', fontSize: 16, fontWeight: '600' },
 });
