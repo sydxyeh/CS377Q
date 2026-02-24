@@ -10,6 +10,7 @@ import {
   stopRecording,
 } from '../services/audioRecording';
 import { transcribeAudio, isTranscriptionAvailable } from '../services/transcription';
+import { transcriptToTaskTitles } from '../services/splitTask';
 
 interface BraindumpModeProps {
   onTasksCreated: (tasks: Task[]) => void;
@@ -216,79 +217,39 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     }
   };
 
-  // ✅ LOGIC SAME, but with a guard to prevent double creation
-  const parseAndCreateTasks = (text: string) => {
+  const buildTasksFromTitles = (titles: string[]): Task[] =>
+    titles.map((title, i) => ({
+      id: `task-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+      title: title.charAt(0).toUpperCase() + title.slice(1),
+      subtasks: [],
+      createdAt: new Date(),
+    }));
+
+  const fallbackParseTitles = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .split(/(?:and also|also|and|oh and|maybe|,|;)/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+
+  const parseAndCreateTasks = async (text: string) => {
     if (processingRef.current) return; // ✅ prevents “doubles”
     processingRef.current = true;
-
     setIsProcessing(true);
 
-    setTimeout(() => {
-      const tasks: Task[] = [];
-
-      const segments = text.toLowerCase()
-        .split(/(?:and also|also|and|oh and|maybe|,|;)/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-
-      segments.forEach((segment) => {
-        const taskId = Date.now().toString() + Math.random();
-        let title = segment.charAt(0).toUpperCase() + segment.slice(1);
-        const subtasks: { id: string; text: string; completed: boolean }[] = [];
-
-        if (segment.includes('clean')) {
-          title = 'Clean room';
-          subtasks.push(
-            { id: taskId + '_1', text: 'Pick up clothes', completed: false },
-            { id: taskId + '_2', text: 'Make bed', completed: false },
-            { id: taskId + '_3', text: 'Vacuum floor', completed: false }
-          );
-        } else if (segment.includes('project') || segment.includes('work')) {
-          title = 'Finish work project';
-          subtasks.push(
-            { id: taskId + '_1', text: 'Review requirements', completed: false },
-            { id: taskId + '_2', text: 'Complete draft', completed: false },
-            { id: taskId + '_3', text: 'Send for review', completed: false }
-          );
-        } else if (segment.includes('call')) {
-          title = 'Call mom';
-          subtasks.push(
-            { id: taskId + '_1', text: 'Find a quiet time', completed: false },
-            { id: taskId + '_2', text: 'Make the call', completed: false }
-          );
-        } else if (segment.includes('organize') || segment.includes('desk')) {
-          title = 'Organize desk';
-          subtasks.push(
-            { id: taskId + '_1', text: 'Clear desk surface', completed: false },
-            { id: taskId + '_2', text: 'Sort papers', completed: false },
-            { id: taskId + '_3', text: 'Arrange supplies', completed: false }
-          );
-        } else if (segment.includes('download')) {
-          title = 'Download files';
-          subtasks.push(
-            { id: taskId + '_1', text: 'Find download links', completed: false },
-            { id: taskId + '_2', text: 'Download files', completed: false },
-            { id: taskId + '_3', text: 'Organize in folders', completed: false }
-          );
-        } else {
-          subtasks.push(
-            { id: taskId + '_1', text: `Start: ${title}`, completed: false },
-            { id: taskId + '_2', text: `Complete: ${title}`, completed: false }
-          );
-        }
-
-        tasks.push({
-          id: taskId,
-          title,
-          subtasks,
-          createdAt: new Date()
-        });
-      });
-
+    try {
+      const titles = await transcriptToTaskTitles(text);
+      const tasks = titles.length > 0 ? buildTasksFromTitles(titles) : buildTasksFromTitles(fallbackParseTitles(text));
       setReviewTasks(JSON.parse(JSON.stringify(tasks)));
+    } catch (_) {
+      const titles = fallbackParseTitles(text);
+      const tasks = buildTasksFromTitles(titles);
+      setReviewTasks(JSON.parse(JSON.stringify(tasks)));
+    } finally {
       setIsProcessing(false);
-      processingRef.current = false; // ✅ release
-    }, 1500);
+      processingRef.current = false;
+    }
   };
 
   const updateReviewTask = (taskId: string, updates: Partial<Pick<Task, 'title'>> & { subtasks?: Subtask[] }) => {
@@ -301,7 +262,11 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       if (!prev) return null;
       return prev.map(t => {
         if (t.id !== taskId) return t;
-        const newSub: Subtask = { id: `${taskId}_${Date.now()}`, text: text.trim(), completed: false };
+        const newSub: Subtask = {
+          id: `${taskId}-sub-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          text: text.trim(),
+          completed: false,
+        };
         return { ...t, subtasks: [...t.subtasks, newSub] };
       });
     });
@@ -319,6 +284,10 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       if (t.id !== taskId) return t;
       return { ...t, subtasks: t.subtasks.filter(s => s.id !== subtaskId) };
     }) : null);
+  };
+
+  const removeReviewTask = (taskId: string) => {
+    setReviewTasks(prev => (prev ? prev.filter(t => t.id !== taskId) : null));
   };
 
   const confirmReviewTasks = () => {
@@ -473,7 +442,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Do these tasks look good?</Text>
-            <Text style={styles.modalSubtitle}>Edit titles or add subtasks, then add them to your list.</Text>
+            <Text style={styles.modalSubtitle}>Edit titles, add subtasks, or remove tasks you don't need. Then add the rest to your list.</Text>
 
             <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {reviewTasks?.map((task) => (
@@ -485,8 +454,8 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                     placeholder="Task title"
                     placeholderTextColor="#9ca3af"
                   />
-                  {task.subtasks.map((sub) => (
-                    <View key={sub.id} style={styles.reviewSubtaskRow}>
+                  {task.subtasks.map((sub, subIdx) => (
+                    <View key={`${task.id}-sub-${subIdx}`} style={styles.reviewSubtaskRow}>
                       <TextInput
                         style={styles.reviewSubtaskInput}
                         value={sub.text}
@@ -508,7 +477,12 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
               <TouchableOpacity style={styles.modalButtonSecondary} onPress={cancelReviewTasks} activeOpacity={0.9}>
                 <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButtonPrimary} onPress={confirmReviewTasks} activeOpacity={0.9}>
+              <TouchableOpacity
+                style={[styles.modalButtonPrimary, (!reviewTasks || reviewTasks.length === 0) && styles.modalButtonPrimaryDisabled]}
+                onPress={confirmReviewTasks}
+                activeOpacity={0.9}
+                disabled={!reviewTasks || reviewTasks.length === 0}
+              >
                 <Ionicons name="checkmark-circle" size={20} color="#fff" />
                 <Text style={styles.modalButtonPrimaryText}>Add to my tasks</Text>
               </TouchableOpacity>
@@ -665,11 +639,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
+  reviewTaskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  reviewTaskRemove: { padding: 4 },
   reviewTaskTitleInput: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 8,
     paddingVertical: 4,
     paddingHorizontal: 0,
     borderBottomWidth: 1,
@@ -699,6 +674,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
   },
+  modalButtonPrimaryDisabled: { opacity: 0.5 },
   modalButtonSecondary: {
     flex: 1,
     alignItems: 'center',

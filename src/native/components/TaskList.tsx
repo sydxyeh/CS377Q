@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import type { Task, GameState, FinishedTask } from '../../../App.native';
 import { format } from 'date-fns';
+import { generateSubtasks, isSplitTaskAvailable } from '../services/splitTask';
 
 type TasksSubTab = 'current' | 'completed';
 
@@ -29,6 +30,11 @@ export default function TaskList({
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [newSubtaskText, setNewSubtaskText] = useState<Record<string, string>>({});
   const [activeSubTab, setActiveSubTab] = useState<TasksSubTab>('current');
+  const [splittingTaskId, setSplittingTaskId] = useState<string | null>(null);
+  const [editingSubtask, setEditingSubtask] = useState<{ taskId: string; subtaskId: string } | null>(null);
+  const [draftSubtaskText, setDraftSubtaskText] = useState('');
+  const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   // --- local ordering for drag ---
   const [orderedIds, setOrderedIds] = useState<string[]>(() => tasks.map(t => t.id));
@@ -85,14 +91,53 @@ export default function TaskList({
   };
 
   const handleCompletePress = (task: Task) => {
-    Alert.alert(
-      'Complete task?',
-      `Move "${task.title}" to completed tasks?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Yes, complete it!', onPress: () => onCompleteTask(task.id) },
-      ]
-    );
+    setTaskToComplete(task);
+  };
+
+  const startEditSubtask = (taskId: string, subtaskId: string, currentText: string) => {
+    setEditingSubtask({ taskId, subtaskId });
+    setDraftSubtaskText(currentText);
+  };
+
+  const submitEditSubtask = (task: Task) => {
+    if (!editingSubtask || editingSubtask.taskId !== task.id) return;
+    const { subtaskId } = editingSubtask;
+    const text = draftSubtaskText.trim();
+    if (text) {
+      const newSubtasks = task.subtasks.map((s) =>
+        s.id === subtaskId ? { ...s, text } : s
+      );
+      onUpdateTask(task.id, { subtasks: newSubtasks });
+    }
+    setEditingSubtask(null);
+    setDraftSubtaskText('');
+  };
+
+  const handleSplitTask = async (task: Task) => {
+    if (!isSplitTaskAvailable()) {
+      Alert.alert(
+        'API key required',
+        'Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file to use Split task.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    setSplittingTaskId(task.id);
+    try {
+      const subtaskLabels = await generateSubtasks(task.title);
+      for (const text of subtaskLabels) {
+        if (text.trim()) onAddSubtask(task.id, text.trim());
+      }
+      if (!expandedTasks.has(task.id)) toggleExpanded(task.id);
+    } catch (err) {
+      Alert.alert(
+        'Split task failed',
+        err instanceof Error ? err.message : 'Could not generate subtasks. Try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setSplittingTaskId(null);
+    }
   };
 
   const totalSubtasks = tasks.reduce((acc, task) => acc + task.subtasks.length, 0);
@@ -128,9 +173,23 @@ export default function TaskList({
               {task.title}
             </Text>
             <Text style={styles.taskMeta}>
-              {doneCount}/{totalCount} complete
+              {totalCount === 0 ? 'No subtasks' : `${doneCount}/${totalCount} complete`}
             </Text>
           </TouchableOpacity>
+
+          {splittingTaskId === task.id ? (
+            <View style={styles.splitTaskButton}>
+              <ActivityIndicator size="small" color="#9333ea" />
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={() => handleSplitTask(task)}
+              style={styles.splitTaskButton}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.splitTaskButtonText}>Split task</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity onPress={() => handleCompletePress(task)} style={styles.completeHit} activeOpacity={0.85}>
             <Ionicons name="checkmark-done-circle-outline" size={22} color="#10b981" />
@@ -139,21 +198,113 @@ export default function TaskList({
 
         {isExpanded && (
           <View style={styles.subtasksContainer}>
-            {task.subtasks.map((subtask) => (
-              <TouchableOpacity
-                key={subtask.id}
-                style={[styles.subtask, subtask.completed && styles.subtaskCompleted]}
-                onPress={() => onToggleSubtask(task.id, subtask.id)}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.checkbox, subtask.completed && styles.checkboxChecked]}>
-                  {subtask.completed && <Ionicons name="checkmark" size={12} color="#fff" />}
+            {(editingTaskId === task.id || task.subtasks.length > 0) && (
+            <View style={styles.subtaskEditBar}>
+              {editingTaskId === task.id ? (
+                <TouchableOpacity
+                  style={styles.subtaskEditDoneButton}
+                  onPress={() => {
+                    setEditingTaskId(null);
+                    if (editingSubtask?.taskId === task.id) setEditingSubtask(null);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                  <Text style={styles.subtaskEditDoneText}>Done</Text>
+                </TouchableOpacity>
+              ) : task.subtasks.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.subtaskEditButton}
+                  onPress={() => setEditingTaskId(task.id)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="pencil" size={16} color="#9333ea" />
+                  <Text style={styles.subtaskEditButtonText}>Edit subtasks</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            )}
+
+            {task.subtasks.map((subtask, subIndex) => {
+              const isEditingSubtask =
+                editingSubtask?.taskId === task.id && editingSubtask?.subtaskId === subtask.id;
+              const isTaskEditMode = editingTaskId === task.id;
+              return (
+                <View
+                  key={`${task.id}-sub-${subIndex}`}
+                  style={[styles.subtask, !isEditingSubtask && subtask.completed && styles.subtaskCompleted]}
+                >
+                  {isTaskEditMode ? (
+                    isEditingSubtask ? (
+                      <>
+                        <TouchableOpacity
+                          onPress={() => {
+                            onUpdateTask(task.id, {
+                              subtasks: task.subtasks.filter((s) => s.id !== subtask.id),
+                            });
+                            setEditingSubtask(null);
+                          }}
+                          style={styles.subtaskTrashHit}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                        </TouchableOpacity>
+                        <TextInput
+                          style={styles.subtaskEditInput}
+                          value={draftSubtaskText}
+                          onChangeText={setDraftSubtaskText}
+                          onSubmitEditing={() => submitEditSubtask(task)}
+                          onBlur={() => submitEditSubtask(task)}
+                          autoFocus
+                          selectTextOnFocus
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <TouchableOpacity
+                          onPress={() => {
+                            onUpdateTask(task.id, {
+                              subtasks: task.subtasks.filter((s) => s.id !== subtask.id),
+                            });
+                          }}
+                          style={styles.subtaskTrashHit}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#ef4444" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.subtaskTextHit}
+                          onPress={() => startEditSubtask(task.id, subtask.id, subtask.text)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={[styles.subtaskText, subtask.completed && styles.subtaskTextCompleted]}>
+                            {subtask.text}
+                          </Text>
+                          <Ionicons name="pencil" size={14} color="#9ca3af" />
+                        </TouchableOpacity>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        onPress={() => onToggleSubtask(task.id, subtask.id)}
+                        style={styles.subtaskCheckboxHit}
+                        activeOpacity={0.85}
+                      >
+                        <View style={[styles.checkbox, subtask.completed && styles.checkboxChecked]}>
+                          {subtask.completed && <Ionicons name="checkmark" size={12} color="#fff" />}
+                        </View>
+                      </TouchableOpacity>
+                      <View style={styles.subtaskTextHit}>
+                        <Text style={[styles.subtaskText, subtask.completed && styles.subtaskTextCompleted]}>
+                          {subtask.text}
+                        </Text>
+                      </View>
+                    </>
+                  )}
                 </View>
-                <Text style={[styles.subtaskText, subtask.completed && styles.subtaskTextCompleted]}>
-                  {subtask.text}
-                </Text>
-              </TouchableOpacity>
-            ))}
+              );
+            })}
 
             <View style={styles.addSubtaskContainer}>
               <TextInput
@@ -177,7 +328,7 @@ export default function TaskList({
         )}
       </View>
     );
-  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask]);
+  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskId]);
 
   if (tasks.length === 0 && finishedTasks.length === 0) {
     return (
@@ -275,12 +426,140 @@ export default function TaskList({
           )}
         </ScrollView>
       )}
+
+      <Modal
+        visible={taskToComplete !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTaskToComplete(null)}
+      >
+        <TouchableOpacity
+          style={styles.completeModalOverlay}
+          activeOpacity={1}
+          onPress={() => setTaskToComplete(null)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} style={styles.completeModalCard}>
+            <View style={styles.completeModalIconWrap}>
+              <Ionicons name="checkmark-done-circle" size={48} color="#10b981" />
+            </View>
+            <Text style={styles.completeModalTitle}>Complete task?</Text>
+            <Text style={styles.completeModalMessage}>
+              Move "{taskToComplete?.title}" to completed tasks?
+            </Text>
+            <View style={styles.completeModalActions}>
+              <TouchableOpacity
+                style={styles.completeModalButtonCancel}
+                onPress={() => setTaskToComplete(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.completeModalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.completeModalButtonConfirm}
+                onPress={() => {
+                  if (taskToComplete) {
+                    onCompleteTask(taskToComplete.id);
+                    setTaskToComplete(null);
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark" size={20} color="#fff" />
+                <Text style={styles.completeModalButtonConfirmText}>Yes, complete it!</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb' },
+
+  completeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  completeModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  completeModalIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#ecfdf5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  completeModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1f2937',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  completeModalMessage: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  completeModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  completeModalButtonCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completeModalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  completeModalButtonConfirm: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  completeModalButtonConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
 
   statsCard: {
     backgroundColor: '#fff',
@@ -359,7 +638,18 @@ const styles = StyleSheet.create({
 
   dragHandle: { paddingTop: 1, paddingRight: 4 },
   expandHit: { paddingTop: 2, paddingHorizontal: 4 },
-  completeHit: { paddingTop: 2, paddingLeft: 6 },
+  completeHit: { paddingTop: 2, paddingLeft: 4 },
+
+  splitTaskButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 72,
+  },
+  splitTaskButtonText: { fontSize: 12, fontWeight: '600', color: '#9333ea' },
 
   graveyardCard: {
     backgroundColor: '#f3f4f6',
@@ -383,6 +673,30 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
   },
+  subtaskEditBar: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  subtaskEditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#ede9fe',
+  },
+  subtaskEditButtonText: { fontSize: 14, fontWeight: '600', color: '#9333ea' },
+  subtaskEditDoneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+  },
+  subtaskEditDoneText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 
   subtask: {
     flexDirection: 'row',
@@ -395,7 +709,17 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   subtaskCompleted: { backgroundColor: '#f0fdf4', borderColor: '#86efac' },
-
+  subtaskCheckboxHit: { padding: 4 },
+  subtaskTrashHit: { padding: 4, justifyContent: 'center' },
+  subtaskTextHit: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  subtaskEditInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1f2937',
+    fontWeight: '500',
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+  },
   checkbox: {
     width: 20,
     height: 20,
@@ -406,7 +730,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: '#10b981', borderColor: '#10b981' },
-
   subtaskText: { flex: 1, fontSize: 14, color: '#1f2937', fontWeight: '500' },
   subtaskTextCompleted: { textDecorationLine: 'line-through', color: '#6b7280' },
 

@@ -183,55 +183,21 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
-    loadData();
+    loadGameStateOnly();
   }, []);
-
-  useEffect(() => {
-    saveTasks();
-  }, [tasks]);
-
-  useEffect(() => {
-    saveFinishedTasks();
-  }, [finishedTasks]);
 
   useEffect(() => {
     saveGameState();
   }, [gameState]);
 
-  const loadData = async () => {
+  const loadGameStateOnly = async () => {
     try {
-      const savedTasks = await AsyncStorage.getItem('adhd-tasks');
-      if (savedTasks) {
-        const parsed = JSON.parse(savedTasks);
-        setTasks(parsed.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
-      }
-      const savedFinished = await AsyncStorage.getItem('adhd-finished-tasks');
-      if (savedFinished) {
-        const parsed = JSON.parse(savedFinished);
-        setFinishedTasks(parsed.map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) })));
-      }
       const savedGameState = await AsyncStorage.getItem('adhd-game-state');
       if (savedGameState) {
         setGameState(JSON.parse(savedGameState));
       }
     } catch (error) {
       console.error('Error loading data:', error);
-    }
-  };
-
-  const saveTasks = async () => {
-    try {
-      await AsyncStorage.setItem('adhd-tasks', JSON.stringify(tasks));
-    } catch (error) {
-      console.error('Error saving tasks:', error);
-    }
-  };
-
-  const saveFinishedTasks = async () => {
-    try {
-      await AsyncStorage.setItem('adhd-finished-tasks', JSON.stringify(finishedTasks));
-    } catch (error) {
-      console.error('Error saving finished tasks:', error);
     }
   };
 
@@ -309,18 +275,21 @@ export default function App() {
   };
 
   const addTasks = (newTasks: Task[]) => {
-    const normalized = newTasks.map((t): Task => ({
-      id: String(t.id),
-      title: String(t.title ?? ''),
-      subtasks: Array.isArray(t.subtasks)
-        ? t.subtasks.map((s) => ({
-            id: String(s.id),
-            text: String(s.text ?? ''),
-            completed: Boolean(s.completed),
-          }))
-        : [],
-      createdAt: t.createdAt instanceof Date ? t.createdAt : new Date(t.createdAt as unknown as string),
-    }));
+    const normalized = newTasks.map((t): Task => {
+      const taskId = String(t.id);
+      return {
+        id: taskId,
+        title: String(t.title ?? ''),
+        subtasks: Array.isArray(t.subtasks)
+          ? t.subtasks.map((s, i) => ({
+              id: `${taskId}-sub-${i}-${Math.random().toString(36).slice(2, 9)}`,
+              text: String(s.text ?? ''),
+              completed: Boolean(s.completed),
+            }))
+          : [],
+        createdAt: t.createdAt instanceof Date ? t.createdAt : new Date(t.createdAt as unknown as string),
+      };
+    });
     setTasks(prev => [...normalized, ...prev]);
   };
 
@@ -373,13 +342,10 @@ export default function App() {
   const addSubtask = (taskId: string, text: string) => {
     setTasks(prev => prev.map(t => {
       if (t.id === taskId) {
+        const subId = `${taskId}-sub-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         return {
           ...t,
-          subtasks: [...t.subtasks, {
-            id: Date.now().toString(),
-            text,
-            completed: false
-          }]
+          subtasks: [...t.subtasks, { id: subId, text, completed: false }]
         };
       }
       return t;
