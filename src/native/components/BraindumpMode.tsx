@@ -348,7 +348,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const getAvatarMessage = () => {
     if (isProcessing) return "Let me organize that for you! 🎯";
     if (isRecording) return "I'm listening... keep going! 💜";
-    if (transcript) return "Got it! Ready when you are! ✨";
+    if (transcript) return "Got it! Ready to create tasks when you are! ✨";
     return "Tell me what's on your mind! 💭";
   };
 
@@ -410,7 +410,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           disabled={isProcessing || hasPermission === false || !isApiConfigured}
           activeOpacity={0.9}
         >
-          <Ionicons name={isRecording ? "mic-off" : "mic"} size={40} color="#fff" />
+          <Ionicons name={isRecording ? "mic-off" : "mic"} size={56} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.recordLabel}>
@@ -557,9 +557,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   recordButton: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 128,
+    height: 128,
+    borderRadius: 64,
     backgroundColor: '#9333ea',
     alignItems: 'center',
     justifyContent: 'center',

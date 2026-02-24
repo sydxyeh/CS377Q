@@ -1,31 +1,32 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { GameState, Task } from '../../../App.native';
+import type { GameState, Task, FinishedTask } from '../../../App.native';
 import CuteAvatar from './CuteAvatar';
 
 interface GameStatsProps {
   gameState: GameState;
   tasks: Task[];
+  finishedTasks: FinishedTask[];
 }
 
-const achievements = [
-  { id: 'first-step', name: 'First Step', description: 'Complete your first task', emoji: '🎯' },
-  { id: 'getting-started', name: 'Getting Started', description: 'Complete 10 tasks', emoji: '⭐' },
-  { id: 'on-a-roll', name: 'On a Roll', description: 'Complete 50 tasks', emoji: '🔥' },
-  { id: 'streak-master', name: 'Streak Master', description: 'Maintain a 3-day streak', emoji: '⚡' },
-  { id: 'level-up', name: 'Rising Star', description: 'Reach level 5', emoji: '🌟' },
-];
+export default function GameStats({ gameState, tasks, finishedTasks }: GameStatsProps) {
+  const done = finishedTasks.length;
+  const nextMilestone = done < 10 ? 10 : (Math.floor(done / 10) + 1) * 10;
+  const remaining = nextMilestone - done;
 
-export default function GameStats({ gameState, tasks }: GameStatsProps) {
-  const pointsToNextLevel = 100 - (gameState.points % 100);
-  const progressToNextLevel = (gameState.points % 100) / 100 * 100;
+  const getBenchmarkEncouragement = () => {
+    if (done > 0 && done % 10 === 0) return `You hit ${done}! Aim for ${done + 10} next! 🎉`;
+    if (done === 0) return 'Complete 10 tasks to reach your first milestone! 🎯';
+    if (remaining === 1) return `So close! Just 1 more task to hit ${nextMilestone}! 🌟`;
+    return `${done} done! ${remaining} more to reach ${nextMilestone}! 💪`;
+  };
 
   const getAvatarMood = () => {
-    if (gameState.level >= 10) return 'cheering';
-    if (gameState.level >= 7) return 'excited';
-    if (gameState.level >= 4) return 'proud';
-    if (gameState.level >= 2) return 'happy';
+    if (done >= 30) return 'cheering';
+    if (done >= 20) return 'excited';
+    if (done >= 10) return 'proud';
+    if (done >= 2) return 'happy';
     return 'neutral';
   };
 
@@ -33,20 +34,11 @@ export default function GameStats({ gameState, tasks }: GameStatsProps) {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.levelCard}>
         <CuteAvatar mood={getAvatarMood()} size="lg" />
-        <Text style={styles.levelTitle}>Level {gameState.level}</Text>
-        <Text style={styles.levelSubtitle}>You're doing amazing!</Text>
+        <Text style={styles.levelTitle}>{done} / {nextMilestone}</Text>
+        <Text style={styles.levelSubtitle}>tasks toward next benchmark</Text>
         
-        <View style={styles.progressContainer}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressText}>{gameState.points} XP</Text>
-            <Text style={styles.progressText}>{gameState.level * 100} XP</Text>
-          </View>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${progressToNextLevel}%` }]} />
-          </View>
-          <Text style={styles.progressLabel}>
-            {pointsToNextLevel} XP to level {gameState.level + 1}
-          </Text>
+        <View style={styles.benchmarkContainer}>
+          <Text style={styles.benchmarkText}>{getBenchmarkEncouragement()}</Text>
         </View>
       </View>
 
@@ -63,76 +55,19 @@ export default function GameStats({ gameState, tasks }: GameStatsProps) {
           <View style={[styles.statIcon, { backgroundColor: '#bbf7d0' }]}>
             <Ionicons name="target" size={20} color="#10b981" />
           </View>
-          <Text style={styles.statValue}>{gameState.totalCompleted}</Text>
+          <Text style={styles.statValue}>{finishedTasks.length}</Text>
           <Text style={styles.statLabel}>Total Done</Text>
         </View>
-
-        <View style={styles.statCard}>
-          <View style={[styles.statIcon, { backgroundColor: '#e9d5ff' }]}>
-            <Ionicons name="flash" size={20} color="#9333ea" />
-          </View>
-          <Text style={styles.statValue}>{gameState.points}</Text>
-          <Text style={styles.statLabel}>Total XP</Text>
-        </View>
-
-        <View style={styles.statCard}>
-          <View style={[styles.statIcon, { backgroundColor: '#bfdbfe' }]}>
-            <Ionicons name="trophy" size={20} color="#3b82f6" />
-          </View>
-          <Text style={styles.statValue}>{gameState.achievements.length}</Text>
-          <Text style={styles.statLabel}>Achievements</Text>
-        </View>
-      </View>
-
-      <View style={styles.achievementsCard}>
-        <View style={styles.achievementsHeader}>
-          <Ionicons name="trophy" size={20} color="#f59e0b" />
-          <Text style={styles.achievementsTitle}>Achievements</Text>
-        </View>
-
-        {achievements.map((achievement) => {
-          const unlocked = gameState.achievements.includes(achievement.id);
-          
-          return (
-            <View
-              key={achievement.id}
-              style={[
-                styles.achievementItem,
-                unlocked && styles.achievementItemUnlocked
-              ]}
-            >
-              <Text style={[styles.achievementEmoji, !unlocked && styles.achievementEmojiLocked]}>
-                {achievement.emoji}
-              </Text>
-              <View style={styles.achievementContent}>
-                <Text style={[
-                  styles.achievementName,
-                  !unlocked && styles.achievementNameLocked
-                ]}>
-                  {achievement.name}
-                </Text>
-                <Text style={styles.achievementDescription}>
-                  {achievement.description}
-                </Text>
-              </View>
-              {unlocked && (
-                <View style={styles.achievementBadge}>
-                  <Ionicons name="star" size={16} color="#fff" />
-                </View>
-              )}
-            </View>
-          );
-        })}
       </View>
 
       <View style={styles.motivationalCard}>
         <Text style={styles.motivationalEmoji}>💜</Text>
         <Text style={styles.motivationalText}>
-          {gameState.totalCompleted === 0 
+          {finishedTasks.length === 0 
             ? "You've got this! Every journey starts with a single step."
-            : gameState.totalCompleted < 10
+            : finishedTasks.length < 10
             ? "Amazing start! Keep the momentum going!"
-            : gameState.totalCompleted < 50
+            : finishedTasks.length < 50
             ? "You're on fire! Look at all that progress!"
             : "Wow! You're absolutely crushing it! 🌟"
           }
@@ -171,34 +106,16 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     marginTop: 4,
   },
-  progressContainer: {
+  benchmarkContainer: {
     width: '100%',
     marginTop: 16,
-    gap: 8,
+    paddingHorizontal: 8,
   },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  progressText: {
-    fontSize: 14,
+  benchmarkText: {
+    fontSize: 15,
     color: '#fff',
-  },
-  progressBar: {
-    height: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 6,
-  },
-  progressLabel: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
+    lineHeight: 22,
   },
   statsGrid: {
     flexDirection: 'row',
@@ -229,68 +146,6 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: '#6b7280',
-  },
-  achievementsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-  },
-  achievementsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  achievementsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  achievementItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#f9fafb',
-    opacity: 0.6,
-  },
-  achievementItemUnlocked: {
-    backgroundColor: '#fef3c7',
-    opacity: 1,
-    borderWidth: 1,
-    borderColor: '#fde047',
-  },
-  achievementEmoji: {
-    fontSize: 32,
-  },
-  achievementEmojiLocked: {
-    opacity: 0.5,
-  },
-  achievementContent: {
-    flex: 1,
-    gap: 2,
-  },
-  achievementName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1f2937',
-  },
-  achievementNameLocked: {
-    color: '#6b7280',
-  },
-  achievementDescription: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  achievementBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#fbbf24',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   motivationalCard: {
     backgroundColor: '#fce7f3',

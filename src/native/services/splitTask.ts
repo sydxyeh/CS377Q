@@ -20,8 +20,7 @@ export function isSplitTaskAvailable(): boolean {
 }
 
 /**
- * Generate 2-5 subtask labels for a given task title.
- * Returns an array of short, actionable strings (e.g. ["Research options", "Draft outline", "Review"]).
+ * Generate 2-5 subtask labels as micro steps to help someone with ADHD get started and avoid getting stuck.
  */
 export async function generateSubtasks(taskTitle: string): Promise<string[]> {
   const apiKey = getApiKey();
@@ -44,11 +43,11 @@ export async function generateSubtasks(taskTitle: string): Promise<string[]> {
         model: 'claude-opus-4-6',
         max_tokens: 500,
         system:
-          'You help break down tasks into 2-5 clear, actionable subtasks. Reply with only a JSON array of strings, one per subtask, e.g. ["First step", "Second step"]. No numbering, no explanation.',
+          'You break down tasks into 2-5 micro steps for someone with ADHD. Each step should be tiny and concrete so they can get started without overwhelm and not get stuck. The first step should be the smallest possible (e.g. "Open the doc" or "Get out one ingredient") to lower the barrier to start. Avoid vague or big steps. Reply with only a JSON array of strings, one per micro step. No numbering, no explanation. Example: ["Open the file", "Write one sentence", "Save"].',
         messages: [
           {
             role: 'user',
-            content: `Break this task into 2-5 concrete subtasks: "${taskTitle}"`,
+            content: `Break "${taskTitle}" into 2-5 micro steps that help someone get started and keep momentum (ADHD-friendly, tiny first step):`,
           },
         ],
       }),

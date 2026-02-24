@@ -193,14 +193,12 @@ export default function TaskList({
               ) : (
                 <TouchableOpacity onPress={() => { setEditingTaskTitleId(task.id); setDraftTaskTitle(task.title); }} style={styles.taskTitleTouchable} activeOpacity={0.85}>
                   <Text style={styles.taskTitle}>
-                    {isCompleted ? '✓ ' : ''}
                     {task.title}
                   </Text>
                 </TouchableOpacity>
               )
             ) : (
               <Text style={styles.taskTitle}>
-                {isCompleted ? '✓ ' : ''}
                 {task.title}
               </Text>
             )}
@@ -257,7 +255,7 @@ export default function TaskList({
                   style={styles.taskActionButton}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.taskActionButtonText}>Split into subtask</Text>
+                  <Text style={styles.taskActionButtonText}>Split into subtasks</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -410,28 +408,6 @@ export default function TaskList({
 
   return (
     <View style={styles.container}>
-      {/* Stats */}
-      <View style={styles.statsCard}>
-        <View style={styles.statsHeader}>
-          <Text style={styles.statsLabel}>Overview</Text>
-          <Text style={styles.statsValue}>{completedSubtasks}/{totalSubtasks}</Text>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statItem}>
-            <Ionicons name="flame" size={14} color="#f97316" />
-            <Text style={styles.statText}>{gameState.streak} day streak</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="flash" size={14} color="#eab308" />
-            <Text style={styles.statText}>{gameState.points} XP</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="list" size={14} color="#9333ea" />
-            <Text style={styles.statText}>{tasks.length} tasks</Text>
-          </View>
-        </View>
-      </View>
-
       {/* Subtab: Current | Completed */}
       <View style={styles.subtabBar}>
         <TouchableOpacity
@@ -439,7 +415,7 @@ export default function TaskList({
           onPress={() => setActiveSubTab('current')}
           activeOpacity={0.8}
         >
-          <Ionicons name="list" size={18} color={activeSubTab === 'current' ? '#fff' : '#6b7280'} />
+          <Text style={[styles.subtabEmoji, activeSubTab === 'current' && styles.subtabEmojiActive]}>✅</Text>
           <Text style={[styles.subtabText, activeSubTab === 'current' && styles.subtabTextActive]}>
             Current
           </Text>

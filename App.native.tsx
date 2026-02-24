@@ -419,7 +419,7 @@ export default function App() {
                 ),
               }}
             >
-              {() => <GameStats gameState={gameState} tasks={tasks} />}
+              {() => <GameStats gameState={gameState} tasks={tasks} finishedTasks={finishedTasks} />}
             </Tab.Screen>
           </Tab.Navigator>
         </SafeAreaView>
