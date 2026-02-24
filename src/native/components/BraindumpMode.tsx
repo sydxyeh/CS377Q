@@ -2,8 +2,26 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withDelay,
+  Easing,
+} from 'react-native-reanimated';
 import type { Task, GameState, Subtask } from '../../../App.native';
 import CuteAvatar from './CuteAvatar';
+
+type NavigationProp = BottomTabNavigationProp<{
+  Braindump: undefined;
+  Tasks: undefined;
+  Buddy: undefined;
+  Stats: undefined;
+}>;
 import {
   requestMicrophonePermission,
   startRecording,
@@ -57,6 +75,7 @@ const reviewStyles = StyleSheet.create({
 });
 
 export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpModeProps) {
+  const navigation = useNavigation<NavigationProp>();
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -66,14 +85,158 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
   const [reviewTasks, setReviewTasks] = useState<Task[] | null>(null);
   const [splittingReviewTaskId, setSplittingReviewTaskId] = useState<string | null>(null);
+  const [tasksConfirmed, setTasksConfirmed] = useState(false);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
   const isTranscribingRef = useRef(false);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ✅ guard against double “Create Tasks” presses / queued taps
+  // ✅ guard against double "Create Tasks" presses / queued taps
   const processingRef = useRef(false);
+
+  // Animation values for pulsing mic button
+  const micButtonScale = useSharedValue(1);
+  
+  // Animation values for ripple waves
+  const ripple1Scale = useSharedValue(0);
+  const ripple1Opacity = useSharedValue(0.4);
+  const ripple2Scale = useSharedValue(0);
+  const ripple2Opacity = useSharedValue(0.4);
+  const ripple3Scale = useSharedValue(0);
+  const ripple3Opacity = useSharedValue(0.4);
+
+  // Animation values for listening dots
+  const dot1Opacity = useSharedValue(0.3);
+  const dot2Opacity = useSharedValue(0.3);
+  const dot3Opacity = useSharedValue(0.3);
+
+  // Pulsing animation for mic button
+  useEffect(() => {
+    if (isRecording) {
+      micButtonScale.value = withRepeat(
+        withSequence(
+          withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.0, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1
+      );
+    } else {
+      micButtonScale.value = withTiming(1.0, { duration: 300 });
+    }
+  }, [isRecording]);
+
+  // Listening dots animation
+  useEffect(() => {
+    if (isRecording) {
+      const animateDots = () => {
+        dot1Opacity.value = withSequence(
+          withTiming(1, { duration: 400 }),
+          withTiming(0.3, { duration: 400 })
+        );
+        dot2Opacity.value = withDelay(200, withSequence(
+          withTiming(1, { duration: 400 }),
+          withTiming(0.3, { duration: 400 })
+        ));
+        dot3Opacity.value = withDelay(400, withSequence(
+          withTiming(1, { duration: 400 }),
+          withTiming(0.3, { duration: 400 })
+        ));
+      };
+
+      // Start animation loop
+      const interval = setInterval(animateDots, 1200);
+      animateDots(); // Start immediately
+
+      return () => clearInterval(interval);
+    } else {
+      dot1Opacity.value = withTiming(0.3);
+      dot2Opacity.value = withTiming(0.3);
+      dot3Opacity.value = withTiming(0.3);
+    }
+  }, [isRecording]);
+
+  // Ripple wave animations
+  useEffect(() => {
+    if (isRecording) {
+      // Function to start a ripple animation
+      const startRipple = (scale: typeof ripple1Scale, opacity: typeof ripple1Opacity) => {
+        scale.value = 0;
+        opacity.value = 0.4;
+        scale.value = withTiming(2.5, {
+          duration: 2000,
+          easing: Easing.out(Easing.ease),
+        });
+        opacity.value = withTiming(0, { duration: 2000 });
+      };
+
+      // Start first ripple immediately
+      startRipple(ripple1Scale, ripple1Opacity);
+      
+      // Start ripple 2 after delay
+      const timeout2 = setTimeout(() => {
+        startRipple(ripple2Scale, ripple2Opacity);
+      }, 700);
+
+      // Start ripple 3 after longer delay
+      const timeout3 = setTimeout(() => {
+        startRipple(ripple3Scale, ripple3Opacity);
+      }, 1400);
+
+      // Repeat pattern every 2 seconds
+      const repeatInterval = setInterval(() => {
+        startRipple(ripple1Scale, ripple1Opacity);
+        setTimeout(() => startRipple(ripple2Scale, ripple2Opacity), 700);
+        setTimeout(() => startRipple(ripple3Scale, ripple3Opacity), 1400);
+      }, 2000);
+
+      return () => {
+        clearTimeout(timeout2);
+        clearTimeout(timeout3);
+        clearInterval(repeatInterval);
+      };
+    } else {
+      // Reset ripples when not recording
+      ripple1Scale.value = withTiming(0, { duration: 200 });
+      ripple1Opacity.value = withTiming(0, { duration: 200 });
+      ripple2Scale.value = withTiming(0, { duration: 200 });
+      ripple2Opacity.value = withTiming(0, { duration: 200 });
+      ripple3Scale.value = withTiming(0, { duration: 200 });
+      ripple3Opacity.value = withTiming(0, { duration: 200 });
+    }
+  }, [isRecording]);
+
+  // Animated styles
+  const micButtonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: micButtonScale.value }],
+  }));
+
+  const ripple1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ripple1Scale.value }],
+    opacity: ripple1Opacity.value,
+  }));
+
+  const ripple2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ripple2Scale.value }],
+    opacity: ripple2Opacity.value,
+  }));
+
+  const ripple3Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ripple3Scale.value }],
+    opacity: ripple3Opacity.value,
+  }));
+
+  const dot1Style = useAnimatedStyle(() => ({
+    opacity: dot1Opacity.value,
+  }));
+
+  const dot2Style = useAnimatedStyle(() => ({
+    opacity: dot2Opacity.value,
+  }));
+
+  const dot3Style = useAnimatedStyle(() => ({
+    opacity: dot3Opacity.value,
+  }));
 
   useEffect(() => {
     (async () => {
@@ -330,12 +493,19 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       }));
       onTasksCreated(toAdd);
     }
+    setTasksConfirmed(true);
+  };
+
+  const goToTaskList = () => {
     setReviewTasks(null);
+    setTasksConfirmed(false);
     setTranscript('');
+    navigation.navigate('Tasks');
   };
 
   const cancelReviewTasks = () => {
     setReviewTasks(null);
+    setTasksConfirmed(false);
   };
 
   const getAvatarMood = () => {
@@ -353,7 +523,8 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
       <View style={styles.avatarCard}>
         <CuteAvatar mood={getAvatarMood()} size="md" />
         <View style={styles.messageBox}>
@@ -395,35 +566,61 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         </View>
       )}
 
-      {isTranscribing && (
-        <View style={styles.infoCard}>
-          <ActivityIndicator size="small" color="#3b82f6" />
-          <Text style={styles.infoText}>Transcribing audio...</Text>
-        </View>
-      )}
-
       {/* Mic Card (boxed + centered) */}
-      <View style={styles.voiceCard}>
-        <TouchableOpacity
-          style={[styles.recordButton, isRecording && styles.recordButtonActive]}
-          onPress={isRecording ? handleStopRecording : handleStartRecording}
-          disabled={isProcessing || hasPermission === false || !isApiConfigured}
-          activeOpacity={0.9}
-        >
-          <Ionicons name={isRecording ? "mic-off" : "mic"} size={56} color="#fff" />
-        </TouchableOpacity>
+      <View style={[styles.voiceCard, isRecording && styles.voiceCardRecording]}>
+        {/* Ripple waves container */}
+        <View style={styles.rippleContainer}>
+          <Animated.View style={[styles.ripple, ripple1Style]} />
+          <Animated.View style={[styles.ripple, ripple2Style]} />
+          <Animated.View style={[styles.ripple, ripple3Style]} />
+        </View>
 
-        <Text style={styles.recordLabel}>
-          {isRecording ? 'Listening...' : 'Tap to start braindump'}
-        </Text>
+        {/* Animated mic button */}
+        <Animated.View style={micButtonAnimatedStyle}>
+          <TouchableOpacity
+            style={[styles.recordButton, isRecording && styles.recordButtonActive]}
+            onPress={isRecording ? handleStopRecording : handleStartRecording}
+            disabled={isProcessing || hasPermission === false || !isApiConfigured}
+            activeOpacity={0.9}
+          >
+            <Ionicons name={isRecording ? "mic-off" : "mic"} size={56} color="#fff" />
+          </TouchableOpacity>
+        </Animated.View>
+
+        {/* Enhanced listening state text */}
+        <View style={styles.recordLabelContainer}>
+          {isRecording ? (
+            <View style={styles.listeningContainer}>
+              <Ionicons name="radio-button-on" size={16} color="#9333ea" />
+              <Text style={styles.recordLabelListening}>Listening</Text>
+              <View style={styles.dotsContainer}>
+                <Animated.View style={[styles.dot, dot1Style]} />
+                <Animated.View style={[styles.dot, dot2Style]} />
+                <Animated.View style={[styles.dot, dot3Style]} />
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.recordLabel}>Tap to start braindump</Text>
+          )}
+        </View>
         <Text style={styles.recordHint}>
           Say whatever's on your mind. No structure needed.
         </Text>
 
+        {/* Done button - appears when recording */}
+        {isRecording && (
+          <TouchableOpacity
+            style={styles.doneButton}
+            onPress={handleStopRecording}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.doneButtonText}>Done</Text>
+          </TouchableOpacity>
+        )}
+
         {transcript && isRecording && (
           <View style={styles.liveTranscript}>
             <Text style={styles.liveTranscriptText}>{transcript}</Text>
-            {isTranscribing && <Text style={styles.liveTranscriptInterim}>Transcribing...</Text>}
           </View>
         )}
       </View>
@@ -456,6 +653,15 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           </View>
         </View>
       )}
+      </ScrollView>
+
+      {/* Transcribing indicator - fixed at bottom */}
+      {isTranscribing && (
+        <View style={styles.transcribingIndicator}>
+          <ActivityIndicator size="small" color="#3b82f6" />
+          <Text style={styles.transcribingText}>Transcribing audio...</Text>
+        </View>
+      )}
 
       <Modal
         visible={reviewTasks !== null}
@@ -469,74 +675,92 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
         >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Do these tasks look good?</Text>
+            <Text style={styles.modalTitle}>
+              {tasksConfirmed ? "Tasks added! 🎉" : "Do these tasks look good?"}
+            </Text>
 
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              {reviewTasks?.map((task) => (
-                <View key={task.id} style={styles.reviewTaskCard}>
-                  <View style={styles.reviewTaskTitleRow}>
-                    <TextInput
-                      style={[styles.reviewTaskTitleInput, { flex: 1 }]}
-                      value={task.title}
-                      onChangeText={(title) => updateReviewTask(task.id, { title })}
-                      placeholder="Task title"
-                      placeholderTextColor="#9ca3af"
-                    />
-                    {isSplitTaskAvailable() && (
-                      splittingReviewTaskId === task.id ? (
-                        <View style={styles.reviewSplitButton}>
-                          <ActivityIndicator size="small" color="#9333ea" />
+            {!tasksConfirmed ? (
+              <>
+                <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  {reviewTasks?.map((task) => (
+                    <View key={task.id} style={styles.reviewTaskCard}>
+                      <View style={styles.reviewTaskTitleRow}>
+                        <TextInput
+                          style={[styles.reviewTaskTitleInput, { flex: 1 }]}
+                          value={task.title}
+                          onChangeText={(title) => updateReviewTask(task.id, { title })}
+                          placeholder="Task title"
+                          placeholderTextColor="#9ca3af"
+                        />
+                        {isSplitTaskAvailable() && (
+                          splittingReviewTaskId === task.id ? (
+                            <View style={styles.reviewSplitButton}>
+                              <ActivityIndicator size="small" color="#9333ea" />
+                            </View>
+                          ) : (
+                            <TouchableOpacity style={styles.reviewSplitButton} onPress={() => handleSplitReviewTask(task)} activeOpacity={0.85}>
+                              <Text style={styles.reviewSplitButtonText}>Split into subtasks</Text>
+                            </TouchableOpacity>
+                          )
+                        )}
+                      </View>
+                      {task.subtasks.map((sub, subIdx) => (
+                        <View key={`${task.id}-sub-${subIdx}`} style={styles.reviewSubtaskRow}>
+                          <TextInput
+                            style={styles.reviewSubtaskInput}
+                            value={sub.text}
+                            onChangeText={(text) => updateReviewSubtask(task.id, sub.id, text)}
+                            placeholder="Subtask"
+                            placeholderTextColor="#9ca3af"
+                          />
+                          <TouchableOpacity onPress={() => removeReviewSubtask(task.id, sub.id)} style={styles.reviewSubtaskRemove}>
+                            <Ionicons name="close-circle" size={22} color="#ef4444" />
+                          </TouchableOpacity>
                         </View>
-                      ) : (
-                        <TouchableOpacity style={styles.reviewSplitButton} onPress={() => handleSplitReviewTask(task)} activeOpacity={0.85}>
-                          <Text style={styles.reviewSplitButtonText}>Split into subtasks</Text>
-                        </TouchableOpacity>
-                      )
-                    )}
-                  </View>
-                  {task.subtasks.map((sub, subIdx) => (
-                    <View key={`${task.id}-sub-${subIdx}`} style={styles.reviewSubtaskRow}>
-                      <TextInput
-                        style={styles.reviewSubtaskInput}
-                        value={sub.text}
-                        onChangeText={(text) => updateReviewSubtask(task.id, sub.id, text)}
-                        placeholder="Subtask"
-                        placeholderTextColor="#9ca3af"
-                      />
-                      <TouchableOpacity onPress={() => removeReviewSubtask(task.id, sub.id)} style={styles.reviewSubtaskRemove}>
-                        <Ionicons name="close-circle" size={22} color="#ef4444" />
-                      </TouchableOpacity>
+                      ))}
+                      <AddSubtaskRow taskId={task.id} onAdd={addReviewSubtask} />
                     </View>
                   ))}
-                  <AddSubtaskRow taskId={task.id} onAdd={addReviewSubtask} />
-                </View>
-              ))}
-            </ScrollView>
+                </ScrollView>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalButtonSecondary} onPress={cancelReviewTasks} activeOpacity={0.9}>
-                <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButtonPrimary, (!reviewTasks || reviewTasks.length === 0) && styles.modalButtonPrimaryDisabled]}
-                onPress={confirmReviewTasks}
-                activeOpacity={0.9}
-                disabled={!reviewTasks || reviewTasks.length === 0}
-              >
-                <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                <Text style={styles.modalButtonPrimaryText}>Add to my tasks</Text>
-              </TouchableOpacity>
-            </View>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.modalButtonSecondary} onPress={cancelReviewTasks} activeOpacity={0.9}>
+                    <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButtonPrimary, (!reviewTasks || reviewTasks.length === 0) && styles.modalButtonPrimaryDisabled]}
+                    onPress={confirmReviewTasks}
+                    activeOpacity={0.9}
+                    disabled={!reviewTasks || reviewTasks.length === 0}
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                    <Text style={styles.modalButtonPrimaryText}>Add to my tasks</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalButtonPrimary}
+                  onPress={goToTaskList}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="list" size={20} color="#fff" />
+                  <Text style={styles.modalButtonPrimaryText}>Go to Task List</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  content: { padding: 16, gap: 16 },
+  container: { flex: 1, backgroundColor: '#f9fafb', position: 'relative' },
+  scrollView: { flex: 1 },
+  content: { padding: 16, gap: 16, paddingBottom: 80 },
 
   avatarCard: {
     backgroundColor: '#ede9fe',
@@ -555,6 +779,28 @@ const styles = StyleSheet.create({
     padding: 32,
     alignItems: 'center',
     gap: 16,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  voiceCardRecording: {
+    backgroundColor: '#f5f3ff',
+    borderWidth: 2,
+    borderColor: '#e9d5ff',
+  },
+  rippleContainer: {
+    position: 'absolute',
+    width: 128,
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+    top: 32,
+  },
+  ripple: {
+    position: 'absolute',
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: '#3b82f6',
   },
   recordButton: {
     width: 128,
@@ -568,9 +814,51 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    zIndex: 10,
   },
-  recordButtonActive: { backgroundColor: '#ef4444' },
+  recordButtonActive: { backgroundColor: '#9333ea' },
+  recordLabelContainer: {
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   recordLabel: { fontSize: 18, fontWeight: '600', color: '#1f2937' },
+  listeningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recordLabelListening: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#9333ea',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#9333ea',
+  },
+  doneButton: {
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#9333ea',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    marginTop: 8,
+  },
+  doneButtonText: {
+    color: '#9333ea',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   recordHint: { fontSize: 14, color: '#6b7280', textAlign: 'center' },
 
   transcriptCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, gap: 12 },
@@ -630,6 +918,23 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   infoText: { fontSize: 14, color: '#1e40af' },
+  transcribingIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#eff6ff',
+    borderTopWidth: 1,
+    borderTopColor: '#bfdbfe',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    zIndex: 100,
+  },
+  transcribingText: { fontSize: 14, color: '#1e40af', fontWeight: '500' },
 
   liveTranscript: {
     marginTop: 16,

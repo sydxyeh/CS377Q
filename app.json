@@ -6,6 +6,7 @@
     "main": "index.js",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "newArchEnabled": true,
     "splash": {
       "backgroundColor": "#9333ea",
       "resizeMode": "contain"
