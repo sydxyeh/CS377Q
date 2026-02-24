@@ -240,22 +240,34 @@ export default function TaskList({
                   {isTaskEditMode ? (
                     isEditingSubtask ? (
                       <>
-                        <TouchableOpacity
-                          onPress={() => {
-                            const wasCompleting = !subtask.completed;
-                            const totalCount = task.subtasks.length;
-                            const doneCount = task.subtasks.filter((s) => s.completed).length;
-                            const wasLastIncomplete = wasCompleting && doneCount === totalCount - 1;
-                            onToggleSubtask(task.id, subtask.id);
-                            if (wasLastIncomplete) setTaskToComplete(task);
-                          }}
-                          style={styles.subtaskCheckboxHit}
-                          activeOpacity={0.85}
-                        >
-                          <View style={[styles.checkbox, subtask.completed && styles.checkboxChecked]}>
-                            {subtask.completed && <Ionicons name="checkmark" size={12} color="#fff" />}
-                          </View>
-                        </TouchableOpacity>
+                        <View style={styles.subtaskReorderWrap}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (subIndex <= 0) return;
+                              const next = [...task.subtasks];
+                              [next[subIndex - 1], next[subIndex]] = [next[subIndex], next[subIndex - 1]];
+                              onUpdateTask(task.id, { subtasks: next });
+                            }}
+                            style={styles.subtaskReorderBtn}
+                            disabled={subIndex === 0}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="chevron-up" size={20} color={subIndex === 0 ? '#d1d5db' : '#6b7280'} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (subIndex >= task.subtasks.length - 1) return;
+                              const next = [...task.subtasks];
+                              [next[subIndex], next[subIndex + 1]] = [next[subIndex + 1], next[subIndex]];
+                              onUpdateTask(task.id, { subtasks: next });
+                            }}
+                            style={styles.subtaskReorderBtn}
+                            disabled={subIndex === task.subtasks.length - 1}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="chevron-down" size={20} color={subIndex === task.subtasks.length - 1 ? '#d1d5db' : '#6b7280'} />
+                          </TouchableOpacity>
+                        </View>
                         <TextInput
                           style={styles.subtaskEditInput}
                           value={draftSubtaskText}
@@ -280,22 +292,34 @@ export default function TaskList({
                       </>
                     ) : (
                       <>
-                        <TouchableOpacity
-                          onPress={() => {
-                            const wasCompleting = !subtask.completed;
-                            const totalCount = task.subtasks.length;
-                            const doneCount = task.subtasks.filter((s) => s.completed).length;
-                            const wasLastIncomplete = wasCompleting && doneCount === totalCount - 1;
-                            onToggleSubtask(task.id, subtask.id);
-                            if (wasLastIncomplete) setTaskToComplete(task);
-                          }}
-                          style={styles.subtaskCheckboxHit}
-                          activeOpacity={0.85}
-                        >
-                          <View style={[styles.checkbox, subtask.completed && styles.checkboxChecked]}>
-                            {subtask.completed && <Ionicons name="checkmark" size={12} color="#fff" />}
-                          </View>
-                        </TouchableOpacity>
+                        <View style={styles.subtaskReorderWrap}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (subIndex <= 0) return;
+                              const next = [...task.subtasks];
+                              [next[subIndex - 1], next[subIndex]] = [next[subIndex], next[subIndex - 1]];
+                              onUpdateTask(task.id, { subtasks: next });
+                            }}
+                            style={styles.subtaskReorderBtn}
+                            disabled={subIndex === 0}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="chevron-up" size={20} color={subIndex === 0 ? '#d1d5db' : '#6b7280'} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (subIndex >= task.subtasks.length - 1) return;
+                              const next = [...task.subtasks];
+                              [next[subIndex], next[subIndex + 1]] = [next[subIndex + 1], next[subIndex]];
+                              onUpdateTask(task.id, { subtasks: next });
+                            }}
+                            style={styles.subtaskReorderBtn}
+                            disabled={subIndex === task.subtasks.length - 1}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="chevron-down" size={20} color={subIndex === task.subtasks.length - 1 ? '#d1d5db' : '#6b7280'} />
+                          </TouchableOpacity>
+                        </View>
                         <TouchableOpacity
                           style={styles.subtaskTextHit}
                           onPress={() => startEditSubtask(task.id, subtask.id, subtask.text)}
@@ -768,6 +792,8 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   subtaskCompleted: { backgroundColor: '#f0fdf4', borderColor: '#86efac' },
+  subtaskReorderWrap: { flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 },
+  subtaskReorderBtn: { padding: 4, justifyContent: 'center', alignItems: 'center' },
   subtaskCheckboxHit: { padding: 4 },
   subtaskTrashHit: { padding: 4, justifyContent: 'center' },
   subtaskTextHit: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
