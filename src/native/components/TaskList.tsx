@@ -172,58 +172,59 @@ export default function TaskList({
               {isCompleted ? '✓ ' : ''}
               {task.title}
             </Text>
-            <Text style={styles.taskMeta}>
-              {totalCount === 0 ? 'No subtasks' : `${doneCount}/${totalCount} complete`}
-            </Text>
+            {totalCount > 0 && (
+              <Text style={styles.taskMeta}>
+                {doneCount}/{totalCount} complete
+              </Text>
+            )}
           </TouchableOpacity>
 
-          {splittingTaskId === task.id ? (
-            <View style={styles.splitTaskButton}>
-              <ActivityIndicator size="small" color="#9333ea" />
-            </View>
-          ) : (
-            <TouchableOpacity
-              onPress={() => handleSplitTask(task)}
-              style={styles.splitTaskButton}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.splitTaskButtonText}>Split task</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity onPress={() => handleCompletePress(task)} style={styles.completeHit} activeOpacity={0.85}>
-            <Ionicons name="checkmark-done-circle-outline" size={22} color="#10b981" />
+          <TouchableOpacity onPress={() => handleCompletePress(task)} style={styles.completeTaskButton} activeOpacity={0.85}>
+            <Text style={styles.completeTaskButtonText}>Complete</Text>
           </TouchableOpacity>
         </View>
 
         {isExpanded && (
           <View style={styles.subtasksContainer}>
-            {(editingTaskId === task.id || task.subtasks.length > 0) && (
             <View style={styles.subtaskEditBar}>
-              {editingTaskId === task.id ? (
-                <TouchableOpacity
-                  style={styles.subtaskEditDoneButton}
-                  onPress={() => {
-                    setEditingTaskId(null);
-                    if (editingSubtask?.taskId === task.id) setEditingSubtask(null);
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="checkmark" size={18} color="#fff" />
-                  <Text style={styles.subtaskEditDoneText}>Done</Text>
-                </TouchableOpacity>
-              ) : task.subtasks.length > 0 ? (
-                <TouchableOpacity
-                  style={styles.subtaskEditButton}
-                  onPress={() => setEditingTaskId(task.id)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="pencil" size={16} color="#9333ea" />
-                  <Text style={styles.subtaskEditButtonText}>Edit subtasks</Text>
-                </TouchableOpacity>
+              {(editingTaskId === task.id || task.subtasks.length > 0) ? (
+                editingTaskId === task.id ? (
+                  <TouchableOpacity
+                    style={styles.subtaskEditDoneButton}
+                    onPress={() => {
+                      setEditingTaskId(null);
+                      if (editingSubtask?.taskId === task.id) setEditingSubtask(null);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="checkmark" size={18} color="#fff" />
+                    <Text style={styles.subtaskEditDoneText}>Done</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.subtaskEditButton}
+                    onPress={() => setEditingTaskId(task.id)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="pencil" size={16} color="#9333ea" />
+                    <Text style={styles.subtaskEditButtonText}>Edit subtasks</Text>
+                  </TouchableOpacity>
+                )
               ) : null}
+              {splittingTaskId === task.id ? (
+                <View style={styles.splitTaskButton}>
+                  <ActivityIndicator size="small" color="#9333ea" />
+                </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => handleSplitTask(task)}
+                  style={styles.splitTaskButton}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.splitTaskButtonText}>Split task</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            )}
 
             {task.subtasks.map((subtask, subIndex) => {
               const isEditingSubtask =
@@ -440,7 +441,7 @@ export default function TaskList({
         >
           <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} style={styles.completeModalCard}>
             <View style={styles.completeModalIconWrap}>
-              <Ionicons name="checkmark-done-circle" size={48} color="#10b981" />
+              <Text style={styles.completeModalEmoji}>🎉</Text>
             </View>
             <Text style={styles.completeModalTitle}>Complete task?</Text>
             <Text style={styles.completeModalMessage}>
@@ -464,7 +465,6 @@ export default function TaskList({
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="checkmark" size={20} color="#fff" />
                 <Text style={styles.completeModalButtonConfirmText}>Yes, complete it!</Text>
               </TouchableOpacity>
             </View>
@@ -507,6 +507,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
   },
+  completeModalEmoji: { fontSize: 44 },
   completeModalTitle: {
     fontSize: 22,
     fontWeight: '700',
@@ -528,8 +529,8 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   completeModalButtonCancel: {
-    flex: 1,
     paddingVertical: 14,
+    paddingHorizontal: 20,
     borderRadius: 12,
     backgroundColor: '#f3f4f6',
     alignItems: 'center',
@@ -542,11 +543,11 @@ const styles = StyleSheet.create({
   },
   completeModalButtonConfirm: {
     flex: 1,
-    flexDirection: 'row',
+    minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     paddingVertical: 14,
+    paddingHorizontal: 12,
     borderRadius: 12,
     backgroundColor: '#10b981',
     shadowColor: '#10b981',
@@ -638,7 +639,16 @@ const styles = StyleSheet.create({
 
   dragHandle: { paddingTop: 1, paddingRight: 4 },
   expandHit: { paddingTop: 2, paddingHorizontal: 4 },
-  completeHit: { paddingTop: 2, paddingLeft: 4 },
+
+  completeTaskButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#10b981',
+  },
+  completeTaskButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 
   splitTaskButton: {
     paddingVertical: 6,
@@ -675,7 +685,10 @@ const styles = StyleSheet.create({
   },
   subtaskEditBar: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 4,
+    gap: 8,
   },
   subtaskEditButton: {
     flexDirection: 'row',
