@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@babel/runtime':
+        specifier: ^7.28.6
+        version: 7.28.6
       '@expo/vector-icons':
         specifier: ~14.0.4
         version: 14.0.4
@@ -41,6 +44,9 @@ importers:
       react-native:
         specifier: 0.76.9
         version: 0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1)
+      react-native-draggable-flatlist:
+        specifier: ^4.0.3
+        version: 4.0.3(@babel/core@7.29.0)(react-native-gesture-handler@2.20.2(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native-reanimated@3.16.7(@babel/core@7.29.0)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))
       react-native-gesture-handler:
         specifier: ~2.20.2
         version: 2.20.2(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
@@ -807,7 +813,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {node: '>=0.10.0'}
+    engines: {'0': node >=0.10.0}
 
   '@expo/cli@0.22.28':
     resolution: {integrity: sha512-lvt72KNitGuixYD2l3SZmRKVu2G4zJpmg5V7WfUBNpmUU5oODBw/6qmiJ6kSLAlfDozscUk+BBGknBBzxUrwrA==}
@@ -2290,24 +2296,28 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.27.0:
     resolution: {integrity: sha512-rCGBm2ax7kQ9pBSeITfCW9XSVF69VX+fm5DIpvDZQl4NnQoMQyRwhZQm9pd59m8leZ1IesRqWk2v/DntMo26lg==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.27.0:
     resolution: {integrity: sha512-Dk/jovSI7qqhJDiUibvaikNKI2x6kWPN79AQiD/E/KeQWMjdGe9kw51RAgoWFDi0coP4jinaH14Nrt/J8z3U4A==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.27.0:
     resolution: {integrity: sha512-QKjTxXm8A9s6v9Tg3Fk0gscCQA1t/HMoF7Woy1u68wCk5kS4fR+q3vXa1p3++REW784cRAtkYKrPy6JKibrEZA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.27.0:
     resolution: {integrity: sha512-/wXegPS1hnhkeG4OXQKEMQeJd48RDC3qdh+OA8pCuOPCyvnm/yEayrJdJVqzBsqpy1aJklRCVxscpFur80o6iQ==}
@@ -2831,6 +2841,13 @@ packages:
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
+
+  react-native-draggable-flatlist@4.0.3:
+    resolution: {integrity: sha512-2F4x5BFieWdGq9SetD2nSAR7s7oQCSgNllYgERRXXtNfSOuAGAVbDb/3H3lP0y5f7rEyNwabKorZAD/SyyNbDw==}
+    peerDependencies:
+      react-native: '>=0.64.0'
+      react-native-gesture-handler: '>=2.0.0'
+      react-native-reanimated: '>=2.8.0'
 
   react-native-gesture-handler@2.20.2:
     resolution: {integrity: sha512-HqzFpFczV4qCnwKlvSAvpzEXisL+Z9fsR08YV5LfJDkzuArMhBu2sOoSPUF/K62PCoAb+ObGlTC83TKHfUd0vg==}
@@ -6887,6 +6904,16 @@ snapshots:
   react-is@16.13.1: {}
 
   react-is@18.3.1: {}
+
+  react-native-draggable-flatlist@4.0.3(@babel/core@7.29.0)(react-native-gesture-handler@2.20.2(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native-reanimated@3.16.7(@babel/core@7.29.0)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1)):
+    dependencies:
+      '@babel/preset-typescript': 7.28.5(@babel/core@7.29.0)
+      react-native: 0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1)
+      react-native-gesture-handler: 2.20.2(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
+      react-native-reanimated: 3.16.7(@babel/core@7.29.0)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
+    transitivePeerDependencies:
+      - '@babel/core'
+      - supports-color
 
   react-native-gesture-handler@2.20.2(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1):
     dependencies:

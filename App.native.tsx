@@ -1,17 +1,34 @@
-import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
-import { StyleSheet, View, StatusBar, Platform, Text, ScrollView, Animated, Dimensions } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  Component,
+  ErrorInfo,
+  ReactNode,
+} from "react";
+import {
+  StyleSheet,
+  View,
+  StatusBar,
+  Platform,
+  Text,
+  ScrollView,
+  Animated,
+  Dimensions,
+} from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { NavigationContainer } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import BraindumpMode from './src/native/components/BraindumpMode';
-import TaskList from './src/native/components/TaskList';
-import AvatarCompanion from './src/native/components/AvatarCompanion';
-import GameStats from './src/native/components/GameStats';
-import Header from './src/native/components/Header';
+import BraindumpMode from "./src/native/components/BraindumpMode";
+import TaskList from "./src/native/components/TaskList";
+import AvatarCompanion from "./src/native/components/AvatarCompanion";
+import GameStats from "./src/native/components/GameStats";
+import Header from "./src/native/components/Header";
 
 // Error Boundary Component
 interface ErrorBoundaryState {
@@ -19,7 +36,10 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  ErrorBoundaryState
+> {
   constructor(props: { children: ReactNode }) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -30,7 +50,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
+    console.error("Error caught by boundary:", error, errorInfo);
   }
 
   render() {
@@ -40,11 +60,9 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
           <ScrollView contentContainerStyle={errorStyles.content}>
             <Text style={errorStyles.title}>Something went wrong</Text>
             <Text style={errorStyles.message}>
-              {this.state.error?.message || 'An unexpected error occurred'}
+              {this.state.error?.message || "An unexpected error occurred"}
             </Text>
-            <Text style={errorStyles.stack}>
-              {this.state.error?.stack}
-            </Text>
+            <Text style={errorStyles.stack}>{this.state.error?.stack}</Text>
           </ScrollView>
         </SafeAreaView>
       );
@@ -82,21 +100,29 @@ export interface GameState {
 
 const Tab = createBottomTabNavigator();
 
-const CONFETTI_COLORS = ['#9333ea', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#ef4444'];
+const CONFETTI_COLORS = [
+  "#9333ea",
+  "#ec4899",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#ef4444",
+];
 const NUM_PIECES = 48;
 
 function ConfettiOverlay({ visible }: { visible: boolean }) {
-  const { width } = Dimensions.get('window');
+  const { width } = Dimensions.get("window");
   const anims = useRef(
     Array.from({ length: NUM_PIECES }, () => ({
       y: new Animated.Value(-20),
       x: new Animated.Value(0),
       rot: new Animated.Value(0),
-      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      color:
+        CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
       startX: Math.random() * width,
       delay: Math.random() * 400,
       duration: 2000 + Math.random() * 1000,
-    }))
+    })),
   ).current;
 
   useEffect(() => {
@@ -109,7 +135,7 @@ function ConfettiOverlay({ visible }: { visible: boolean }) {
     const animations = anims.map((a) =>
       Animated.parallel([
         Animated.timing(a.y, {
-          toValue: Dimensions.get('window').height + 30,
+          toValue: Dimensions.get("window").height + 30,
           duration: a.duration,
           delay: a.delay,
           useNativeDriver: true,
@@ -126,7 +152,7 @@ function ConfettiOverlay({ visible }: { visible: boolean }) {
           delay: a.delay,
           useNativeDriver: true,
         }),
-      ])
+      ]),
     );
     Animated.stagger(0, animations).start();
   }, [visible]);
@@ -145,7 +171,12 @@ function ConfettiOverlay({ visible }: { visible: boolean }) {
               transform: [
                 { translateY: a.y },
                 { translateX: a.x },
-                { rotate: a.rot.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] }) },
+                {
+                  rotate: a.rot.interpolate({
+                    inputRange: [0, 360],
+                    outputRange: ["0deg", "360deg"],
+                  }),
+                },
               ],
             },
           ]}
@@ -161,7 +192,7 @@ const confettiStyles = StyleSheet.create({
     zIndex: 9999,
   },
   piece: {
-    position: 'absolute',
+    position: "absolute",
     width: 10,
     height: 10,
     borderRadius: 2,
@@ -177,7 +208,7 @@ export default function App() {
     streak: 0,
     lastCompletedDate: null,
     achievements: [],
-    totalCompleted: 0
+    totalCompleted: 0,
   });
   const [showCelebration, setShowCelebration] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -192,84 +223,87 @@ export default function App() {
 
   const loadGameStateOnly = async () => {
     try {
-      const savedGameState = await AsyncStorage.getItem('adhd-game-state');
+      const savedGameState = await AsyncStorage.getItem("adhd-game-state");
       if (savedGameState) {
         setGameState(JSON.parse(savedGameState));
       }
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error("Error loading data:", error);
     }
   };
 
   const saveGameState = async () => {
     try {
-      await AsyncStorage.setItem('adhd-game-state', JSON.stringify(gameState));
+      await AsyncStorage.setItem("adhd-game-state", JSON.stringify(gameState));
     } catch (error) {
-      console.error('Error saving game state:', error);
+      console.error("Error saving game state:", error);
     }
   };
 
   const addPoints = (points: number) => {
-    setGameState(prev => {
+    setGameState((prev) => {
       const newPoints = prev.points + points;
       const newLevel = Math.floor(newPoints / 100) + 1;
       const leveledUp = newLevel > prev.level;
-      
+
       if (leveledUp) {
         setShowCelebration(true);
         setTimeout(() => setShowCelebration(false), 3000);
       }
-      
+
       return {
         ...prev,
         points: newPoints,
-        level: newLevel
+        level: newLevel,
       };
     });
   };
 
   const updateStreak = () => {
     const today = new Date().toDateString();
-    setGameState(prev => {
+    setGameState((prev) => {
       if (prev.lastCompletedDate === today) {
         return prev;
       }
-      
+
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const isConsecutive = prev.lastCompletedDate === yesterday.toDateString();
-      
+
       return {
         ...prev,
         streak: isConsecutive ? prev.streak + 1 : 1,
-        lastCompletedDate: today
+        lastCompletedDate: today,
       };
     });
   };
 
   const checkAchievements = (completedCount: number) => {
-    setGameState(prev => {
+    setGameState((prev) => {
       const newAchievements = [...prev.achievements];
-      
-      if (completedCount >= 1 && !newAchievements.includes('first-step')) {
-        newAchievements.push('first-step');
+
+      if (completedCount >= 1 && !newAchievements.includes("first-step")) {
+        newAchievements.push("first-step");
       }
-      if (completedCount >= 10 && !newAchievements.includes('getting-started')) {
-        newAchievements.push('getting-started');
+      if (
+        completedCount >= 10 &&
+        !newAchievements.includes("getting-started")
+      ) {
+        newAchievements.push("getting-started");
       }
-      if (completedCount >= 50 && !newAchievements.includes('on-a-roll')) {
-        newAchievements.push('on-a-roll');
+      if (completedCount >= 50 && !newAchievements.includes("on-a-roll")) {
+        newAchievements.push("on-a-roll");
       }
-      if (prev.streak >= 3 && !newAchievements.includes('streak-master')) {
-        newAchievements.push('streak-master');
+      if (prev.streak >= 3 && !newAchievements.includes("streak-master")) {
+        newAchievements.push("streak-master");
       }
-      if (prev.level >= 5 && !newAchievements.includes('level-up')) {
-        newAchievements.push('level-up');
+      if (prev.level >= 5 && !newAchievements.includes("level-up")) {
+        newAchievements.push("level-up");
       }
-      
+
       return {
         ...prev,
-        achievements: newAchievements
+        achievements: newAchievements,
       };
     });
   };
@@ -279,22 +313,27 @@ export default function App() {
       const taskId = String(t.id);
       return {
         id: taskId,
-        title: String(t.title ?? ''),
+        title: String(t.title ?? ""),
         subtasks: Array.isArray(t.subtasks)
           ? t.subtasks.map((s, i) => ({
               id: `${taskId}-sub-${i}-${Math.random().toString(36).slice(2, 9)}`,
-              text: String(s.text ?? ''),
+              text: String(s.text ?? ""),
               completed: Boolean(s.completed),
             }))
           : [],
-        createdAt: t.createdAt instanceof Date ? t.createdAt : new Date(t.createdAt as unknown as string),
+        createdAt:
+          t.createdAt instanceof Date
+            ? t.createdAt
+            : new Date(t.createdAt as unknown as string),
       };
     });
-    setTasks(prev => [...normalized, ...prev]);
+    setTasks((prev) => [...normalized, ...prev]);
   };
 
   const updateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t)),
+    );
   };
 
   const reorderTasks = (reordered: Task[]) => {
@@ -302,163 +341,183 @@ export default function App() {
   };
 
   const completeTask = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
+    const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
     const finished: FinishedTask = {
       ...task,
       completedAt: new Date().toISOString(),
     };
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    setFinishedTasks(prev => [finished, ...prev]);
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setFinishedTasks((prev) => [finished, ...prev]);
     setShowConfetti(true);
     setTimeout(() => setShowConfetti(false), 2500);
   };
 
   const toggleSubtask = (taskId: string, subtaskId: string) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id === taskId) {
-        return {
-          ...t,
-          subtasks: t.subtasks.map(s => {
-            if (s.id === subtaskId) {
-              const nowCompleted = !s.completed;
-              if (nowCompleted) {
-                addPoints(10);
-                updateStreak();
-                setGameState(gs => {
-                  const newTotal = gs.totalCompleted + 1;
-                  checkAchievements(newTotal);
-                  return { ...gs, totalCompleted: newTotal };
-                });
-              } else {
-                addPoints(-10);
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === taskId) {
+          return {
+            ...t,
+            subtasks: t.subtasks.map((s) => {
+              if (s.id === subtaskId) {
+                const nowCompleted = !s.completed;
+                if (nowCompleted) {
+                  addPoints(10);
+                  updateStreak();
+                  setGameState((gs) => {
+                    const newTotal = gs.totalCompleted + 1;
+                    checkAchievements(newTotal);
+                    return { ...gs, totalCompleted: newTotal };
+                  });
+                } else {
+                  addPoints(-10);
+                }
+                return { ...s, completed: nowCompleted };
               }
-              return { ...s, completed: nowCompleted };
-            }
-            return s;
-          })
-        };
-      }
-      return t;
-    }));
+              return s;
+            }),
+          };
+        }
+        return t;
+      }),
+    );
   };
 
   const addSubtask = (taskId: string, text: string) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id === taskId) {
-        const subId = `${taskId}-sub-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        return {
-          ...t,
-          subtasks: [...t.subtasks, { id: subId, text, completed: false }]
-        };
-      }
-      return t;
-    }));
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === taskId) {
+          const subId = `${taskId}-sub-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          return {
+            ...t,
+            subtasks: [...t.subtasks, { id: subId, text, completed: false }],
+          };
+        }
+        return t;
+      }),
+    );
   };
 
   return (
-    <ErrorBoundary>
-      <GestureHandlerRootView style={styles.container}>
-        <NavigationContainer>
-          <SafeAreaView style={styles.container} edges={['top']}>
-          <StatusBar barStyle="dark-content" />
-          <Header gameState={gameState} />
-          <ConfettiOverlay visible={showConfetti} />
-          <Tab.Navigator
-            screenOptions={{
-              headerShown: false,
-              tabBarActiveTintColor: '#9333ea',
-              tabBarInactiveTintColor: '#6b7280',
-              tabBarStyle: {
-                backgroundColor: '#ffffff',
-                borderTopWidth: 1,
-                borderTopColor: '#e5e7eb',
-                paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-                height: Platform.OS === 'ios' ? 90 : 70,
-              },
-            }}
-          >
-            <Tab.Screen
-              name="Braindump"
-              options={{
-                tabBarIcon: ({ color, size }) => (
-                  <Ionicons name="bulb-outline" size={size} color={color} />
-                ),
-              }}
-            >
-              {() => <BraindumpMode onTasksCreated={addTasks} gameState={gameState} />}
-            </Tab.Screen>
-            
-            <Tab.Screen
-              name="Tasks"
-              options={{
-                tabBarIcon: ({ color, size }) => (
-                  <Ionicons name="list-outline" size={size} color={color} />
-                ),
-              }}
-            >
-              {() => (
-                <TaskList
-                  tasks={tasks}
-                  finishedTasks={finishedTasks}
-                  onToggleSubtask={toggleSubtask}
-                  onAddSubtask={addSubtask}
-                  onCompleteTask={completeTask}
-                  onUpdateTask={updateTask}
-                  onReorderTasks={reorderTasks}
-                  gameState={gameState}
-                />
-              )}
-            </Tab.Screen>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <GestureHandlerRootView style={styles.container}>
+          <NavigationContainer>
+            <SafeAreaView style={styles.container} edges={["top"]}>
+              <StatusBar barStyle="dark-content" />
+              <Header gameState={gameState} />
+              <ConfettiOverlay visible={showConfetti} />
+              <Tab.Navigator
+                screenOptions={{
+                  headerShown: false,
+                  tabBarActiveTintColor: "#9333ea",
+                  tabBarInactiveTintColor: "#6b7280",
+                  tabBarStyle: {
+                    backgroundColor: "#ffffff",
+                    borderTopWidth: 1,
+                    borderTopColor: "#e5e7eb",
+                    paddingBottom: Platform.OS === "ios" ? 20 : 10,
+                    height: Platform.OS === "ios" ? 90 : 70,
+                  },
+                }}
+              >
+                <Tab.Screen
+                  name="Braindump"
+                  options={{
+                    tabBarIcon: ({ color, size }) => (
+                      <Ionicons name="bulb-outline" size={size} color={color} />
+                    ),
+                  }}
+                >
+                  {() => (
+                    <BraindumpMode
+                      onTasksCreated={addTasks}
+                      gameState={gameState}
+                    />
+                  )}
+                </Tab.Screen>
 
-            <Tab.Screen
-              name="Stats"
-              options={{
-                tabBarIcon: ({ color, size }) => (
-                  <Ionicons name="trophy-outline" size={size} color={color} />
-                ),
-              }}
-            >
-              {() => <GameStats gameState={gameState} tasks={tasks} finishedTasks={finishedTasks} />}
-            </Tab.Screen>
-          </Tab.Navigator>
-        </SafeAreaView>
-        </NavigationContainer>
-      </GestureHandlerRootView>
-    </ErrorBoundary>
+                <Tab.Screen
+                  name="Tasks"
+                  options={{
+                    tabBarIcon: ({ color, size }) => (
+                      <Ionicons name="list-outline" size={size} color={color} />
+                    ),
+                  }}
+                >
+                  {() => (
+                    <TaskList
+                      tasks={tasks}
+                      finishedTasks={finishedTasks}
+                      onToggleSubtask={toggleSubtask}
+                      onAddSubtask={addSubtask}
+                      onCompleteTask={completeTask}
+                      onUpdateTask={updateTask}
+                      onReorderTasks={reorderTasks}
+                      gameState={gameState}
+                    />
+                  )}
+                </Tab.Screen>
+
+                <Tab.Screen
+                  name="Stats"
+                  options={{
+                    tabBarIcon: ({ color, size }) => (
+                      <Ionicons
+                        name="trophy-outline"
+                        size={size}
+                        color={color}
+                      />
+                    ),
+                  }}
+                >
+                  {() => (
+                    <GameStats
+                      gameState={gameState}
+                      tasks={tasks}
+                      finishedTasks={finishedTasks}
+                    />
+                  )}
+                </Tab.Screen>
+              </Tab.Navigator>
+            </SafeAreaView>
+          </NavigationContainer>
+        </GestureHandlerRootView>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: "#f9fafb",
   },
 });
 
 const errorStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: "#f9fafb",
   },
   content: {
     padding: 20,
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#dc2626',
+    fontWeight: "bold",
+    color: "#dc2626",
     marginBottom: 10,
   },
   message: {
     fontSize: 16,
-    color: '#374151',
+    color: "#374151",
     marginBottom: 20,
   },
   stack: {
     fontSize: 12,
-    color: '#6b7280',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    color: "#6b7280",
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
   },
 });
-
