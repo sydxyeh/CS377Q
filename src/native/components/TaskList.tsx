@@ -15,6 +15,7 @@ interface TaskListProps {
   onAddSubtask: (taskId: string, text: string) => void;
   onCompleteTask: (taskId: string) => void;
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
+  onReorderTasks?: (reordered: Task[]) => void;
   gameState: GameState;
 }
 
@@ -25,6 +26,7 @@ export default function TaskList({
   onAddSubtask,
   onCompleteTask,
   onUpdateTask,
+  onReorderTasks,
   gameState
 }: TaskListProps) {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
@@ -35,17 +37,14 @@ export default function TaskList({
   const [draftSubtaskText, setDraftSubtaskText] = useState('');
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskListEditMode, setTaskListEditMode] = useState(false);
+  const [editingTaskTitleId, setEditingTaskTitleId] = useState<string | null>(null);
+  const [draftTaskTitle, setDraftTaskTitle] = useState('');
 
-  // --- local ordering for drag ---
   const [orderedIds, setOrderedIds] = useState<string[]>(() => tasks.map(t => t.id));
 
   useEffect(() => {
-    setOrderedIds(prev => {
-      const incoming = tasks.map(t => t.id);
-      const kept = prev.filter(id => incoming.includes(id));
-      const added = incoming.filter(id => !kept.includes(id));
-      return [...kept, ...added];
-    });
+    setOrderedIds(tasks.map(t => t.id));
   }, [tasks]);
 
   const tasksById = useMemo(() => {
@@ -144,20 +143,30 @@ export default function TaskList({
   const completedSubtasks = tasks.reduce((acc, task) =>
     acc + task.subtasks.filter(s => s.completed).length, 0);
 
+  const submitTaskTitleEdit = useCallback((taskId: string) => {
+    if (editingTaskTitleId !== taskId) return;
+    const title = draftTaskTitle.trim();
+    if (title) onUpdateTask(taskId, { title });
+    setEditingTaskTitleId(null);
+    setDraftTaskTitle('');
+  }, [editingTaskTitleId, draftTaskTitle, onUpdateTask]);
+
   const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<Task>) => {
     const task = item;
     const isExpanded = expandedTasks.has(task.id);
     const doneCount = task.subtasks.filter(s => s.completed).length;
     const totalCount = task.subtasks.length;
     const isCompleted = totalCount > 0 && doneCount === totalCount;
+    const isEditingTitle = taskListEditMode && editingTaskTitleId === task.id;
 
     return (
       <View style={[styles.taskCard, isCompleted && styles.taskCardCompleted, isActive && styles.taskCardActive]}>
         <View style={styles.taskHeader}>
-          {/* drag handle */}
-          <TouchableOpacity onLongPress={drag} style={styles.dragHandle} activeOpacity={0.8}>
-            <Ionicons name="reorder-two" size={22} color="#9ca3af" />
-          </TouchableOpacity>
+          {taskListEditMode && (
+            <TouchableOpacity onLongPress={drag} style={styles.dragHandle} activeOpacity={0.8}>
+              <Ionicons name="reorder-two" size={22} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.expandHit} onPress={() => toggleExpanded(task.id)} activeOpacity={0.8}>
             <Ionicons
@@ -167,11 +176,34 @@ export default function TaskList({
             />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.taskHeaderContent} onPress={() => toggleExpanded(task.id)} activeOpacity={0.85}>
-            <Text style={styles.taskTitle}>
-              {isCompleted ? '✓ ' : ''}
-              {task.title}
-            </Text>
+          <TouchableOpacity style={styles.taskHeaderContent} onPress={() => !taskListEditMode && toggleExpanded(task.id)} activeOpacity={0.85}>
+            {taskListEditMode ? (
+              isEditingTitle ? (
+                <TextInput
+                  style={styles.taskTitleInput}
+                  value={draftTaskTitle}
+                  onChangeText={setDraftTaskTitle}
+                  onSubmitEditing={() => submitTaskTitleEdit(task.id)}
+                  onBlur={() => submitTaskTitleEdit(task.id)}
+                  autoFocus
+                  selectTextOnFocus
+                  placeholder="Task title"
+                  placeholderTextColor="#9ca3af"
+                />
+              ) : (
+                <TouchableOpacity onPress={() => { setEditingTaskTitleId(task.id); setDraftTaskTitle(task.title); }} style={styles.taskTitleTouchable} activeOpacity={0.85}>
+                  <Text style={styles.taskTitle}>
+                    {isCompleted ? '✓ ' : ''}
+                    {task.title}
+                  </Text>
+                </TouchableOpacity>
+              )
+            ) : (
+              <Text style={styles.taskTitle}>
+                {isCompleted ? '✓ ' : ''}
+                {task.title}
+              </Text>
+            )}
             {totalCount > 0 && (
               <Text style={styles.taskMeta}>
                 {doneCount}/{totalCount} complete
@@ -179,9 +211,11 @@ export default function TaskList({
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => handleCompletePress(task)} style={styles.completeTaskButton} activeOpacity={0.85}>
-            <Text style={styles.completeTaskButtonText}>Complete</Text>
-          </TouchableOpacity>
+          {!taskListEditMode && (
+            <TouchableOpacity onPress={() => handleCompletePress(task)} style={styles.completeTaskButton} activeOpacity={0.85}>
+              <Text style={styles.completeTaskButtonText}>Complete</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {isExpanded && (
@@ -393,7 +427,7 @@ export default function TaskList({
         )}
       </View>
     );
-  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskId]);
+  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskId, taskListEditMode, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit]);
 
   if (tasks.length === 0 && finishedTasks.length === 0) {
     return (
@@ -467,7 +501,10 @@ export default function TaskList({
           data={orderedTasks}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          onDragEnd={({ data }) => setOrderedIds(data.map(t => t.id))}
+          onDragEnd={({ data }) => {
+            setOrderedIds(data.map(t => t.id));
+            onReorderTasks?.(data);
+          }}
           contentContainerStyle={styles.listContent}
           activationDistance={12}
         />
@@ -490,6 +527,28 @@ export default function TaskList({
             ))
           )}
         </ScrollView>
+      )}
+
+      {activeSubTab === 'current' && tasks.length > 0 && (
+        <View style={styles.editTasksFloating}>
+          <TouchableOpacity
+            style={[styles.editTasksButton, taskListEditMode && styles.editTasksButtonActive]}
+            onPress={() => {
+              if (taskListEditMode && editingTaskTitleId && draftTaskTitle.trim()) {
+                onUpdateTask(editingTaskTitleId, { title: draftTaskTitle.trim() });
+              }
+              setTaskListEditMode(prev => !prev);
+              setEditingTaskTitleId(null);
+              setDraftTaskTitle('');
+            }}
+            activeOpacity={0.85}
+          >
+            <Ionicons name={taskListEditMode ? 'checkmark' : 'pencil'} size={18} color={taskListEditMode ? '#fff' : '#9333ea'} />
+            <Text style={[styles.editTasksButtonText, taskListEditMode && styles.editTasksButtonTextActive]}>
+              {taskListEditMode ? 'Done' : 'Edit tasks'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       <Modal
@@ -771,7 +830,15 @@ const styles = StyleSheet.create({
 
   taskHeaderContent: { flex: 1, gap: 6 },
   taskTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
+  taskTitleInput: { fontSize: 16, fontWeight: '600', color: '#1f2937', paddingVertical: 2, paddingHorizontal: 0, borderBottomWidth: 1, borderBottomColor: '#9333ea' },
+  taskTitleTouchable: { alignSelf: 'stretch' },
   taskMeta: { fontSize: 12, color: '#6b7280' },
+
+  editTasksFloating: { position: 'absolute', bottom: 24, right: 20 },
+  editTasksButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#ede9fe' },
+  editTasksButtonActive: { backgroundColor: '#9333ea' },
+  editTasksButtonText: { fontSize: 14, fontWeight: '600', color: '#9333ea' },
+  editTasksButtonTextActive: { color: '#fff' },
 
   subtasksContainer: {
     padding: 16,

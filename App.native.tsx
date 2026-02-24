@@ -297,6 +297,10 @@ export default function App() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
 
+  const reorderTasks = (reordered: Task[]) => {
+    setTasks(reordered);
+  };
+
   const completeTask = (taskId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
@@ -401,6 +405,7 @@ export default function App() {
                   onAddSubtask={addSubtask}
                   onCompleteTask={completeTask}
                   onUpdateTask={updateTask}
+                  onReorderTasks={reorderTasks}
                   gameState={gameState}
                 />
               )}
