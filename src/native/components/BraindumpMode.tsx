@@ -10,7 +10,7 @@ import {
   stopRecording,
 } from '../services/audioRecording';
 import { transcribeAudio, isTranscriptionAvailable } from '../services/transcription';
-import { transcriptToTaskTitles } from '../services/splitTask';
+import { transcriptToTaskTitles, generateSubtasks, isSplitTaskAvailable } from '../services/splitTask';
 
 interface BraindumpModeProps {
   onTasksCreated: (tasks: Task[]) => void;
@@ -65,6 +65,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
   const [reviewTasks, setReviewTasks] = useState<Task[] | null>(null);
+  const [splittingReviewTaskId, setSplittingReviewTaskId] = useState<string | null>(null);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
@@ -290,6 +291,33 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     setReviewTasks(prev => (prev ? prev.filter(t => t.id !== taskId) : null));
   };
 
+  const addReviewSubtasks = (taskId: string, labels: string[]) => {
+    if (labels.length === 0) return;
+    const ts = Date.now();
+    const newSubs: Subtask[] = labels.map((text, i) => ({
+      id: `${taskId}-sub-${ts}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+      text: text.trim(),
+      completed: false,
+    }));
+    setReviewTasks(prev => prev ? prev.map(t => t.id === taskId ? { ...t, subtasks: [...t.subtasks, ...newSubs] } : t) : null);
+  };
+
+  const handleSplitReviewTask = async (task: Task) => {
+    if (!isSplitTaskAvailable()) {
+      Alert.alert('API key required', 'Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env to use Split task.', [{ text: 'OK' }]);
+      return;
+    }
+    setSplittingReviewTaskId(task.id);
+    try {
+      const labels = await generateSubtasks(task.title);
+      addReviewSubtasks(task.id, labels);
+    } catch (err) {
+      Alert.alert('Split failed', err instanceof Error ? err.message : 'Could not split task. Try again.', [{ text: 'OK' }]);
+    } finally {
+      setSplittingReviewTaskId(null);
+    }
+  };
+
   const confirmReviewTasks = () => {
     if (reviewTasks && reviewTasks.length > 0) {
       const toAdd: Task[] = reviewTasks.map((t) => ({
@@ -442,18 +470,30 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Do these tasks look good?</Text>
-            <Text style={styles.modalSubtitle}>Edit titles, add subtasks, or remove tasks you don't need. Then add the rest to your list.</Text>
 
             <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {reviewTasks?.map((task) => (
                 <View key={task.id} style={styles.reviewTaskCard}>
-                  <TextInput
-                    style={styles.reviewTaskTitleInput}
-                    value={task.title}
-                    onChangeText={(title) => updateReviewTask(task.id, { title })}
-                    placeholder="Task title"
-                    placeholderTextColor="#9ca3af"
-                  />
+                  <View style={styles.reviewTaskTitleRow}>
+                    <TextInput
+                      style={[styles.reviewTaskTitleInput, { flex: 1 }]}
+                      value={task.title}
+                      onChangeText={(title) => updateReviewTask(task.id, { title })}
+                      placeholder="Task title"
+                      placeholderTextColor="#9ca3af"
+                    />
+                    {isSplitTaskAvailable() && (
+                      splittingReviewTaskId === task.id ? (
+                        <View style={styles.reviewSplitButton}>
+                          <ActivityIndicator size="small" color="#9333ea" />
+                        </View>
+                      ) : (
+                        <TouchableOpacity style={styles.reviewSplitButton} onPress={() => handleSplitReviewTask(task)} activeOpacity={0.85}>
+                          <Text style={styles.reviewSplitButtonText}>Split into subtasks</Text>
+                        </TouchableOpacity>
+                      )
+                    )}
+                  </View>
                   {task.subtasks.map((sub, subIdx) => (
                     <View key={`${task.id}-sub-${subIdx}`} style={styles.reviewSubtaskRow}>
                       <TextInput
@@ -468,7 +508,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                       </TouchableOpacity>
                     </View>
                   ))}
-                  <AddSubtaskRow taskId={task.id} onAdd={addReviewSubtask} styles={styles} />
+                  <AddSubtaskRow taskId={task.id} onAdd={addReviewSubtask} />
                 </View>
               ))}
             </ScrollView>
@@ -663,6 +703,16 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   reviewSubtaskRemove: { padding: 4 },
+  reviewSplitRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6, marginBottom: 4 },
+  reviewSplitButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reviewSplitButtonText: { fontSize: 13, fontWeight: '600', color: '#9333ea' },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
   modalButtonPrimary: {
     flex: 1,
