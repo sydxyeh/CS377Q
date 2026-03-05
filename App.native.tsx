@@ -212,6 +212,7 @@ export default function App() {
   });
   const [showCelebration, setShowCelebration] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [completedTabJustUpdated, setCompletedTabJustUpdated] = useState(false);
 
   useEffect(() => {
     loadGameStateOnly();
@@ -355,6 +356,8 @@ export default function App() {
     setShowConfetti(true);
     setTimeout(() => {
       completeTask(task.id);
+      setCompletedTabJustUpdated(true);
+      setTimeout(() => setCompletedTabJustUpdated(false), 2200);
       setShowConfetti(false);
     }, 2600);
   };
@@ -462,6 +465,7 @@ export default function App() {
                       onConfirmCompleteTask={completeTaskWithCelebration}
                       onUpdateTask={updateTask}
                       onReorderTasks={reorderTasks}
+                      completedTabJustUpdated={completedTabJustUpdated}
                       gameState={gameState}
                     />
                   )}

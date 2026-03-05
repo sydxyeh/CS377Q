@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal, Keyboard, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal, Keyboard, Animated, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
@@ -24,6 +24,7 @@ interface TaskListProps {
   onConfirmCompleteTask?: (task: Task) => void;
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
   onReorderTasks?: (reordered: Task[]) => void;
+  completedTabJustUpdated?: boolean;
   gameState: GameState;
 }
 
@@ -36,6 +37,7 @@ export default function TaskList({
   onConfirmCompleteTask,
   onUpdateTask,
   onReorderTasks,
+  completedTabJustUpdated,
   gameState
 }: TaskListProps) {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
@@ -47,6 +49,8 @@ export default function TaskList({
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   const completingOpacityRef = useRef(new Animated.Value(1)).current;
+  const completingSlideRef = useRef(new Animated.Value(0)).current;
+  const completedTabPulseRef = useRef(new Animated.Value(1)).current;
   const [editingTaskTitleId, setEditingTaskTitleId] = useState<string | null>(null);
   const [draftTaskTitle, setDraftTaskTitle] = useState('');
 
@@ -78,22 +82,55 @@ export default function TaskList({
 
   useEffect(() => {
     if (!completingTaskId) return;
+    const screenWidth = Dimensions.get('window').width;
     completingOpacityRef.setValue(1);
-    const anim = Animated.timing(completingOpacityRef, {
+    completingSlideRef.setValue(0);
+    const opacityAnim = Animated.timing(completingOpacityRef, {
       toValue: 0.72,
       duration: 600,
       useNativeDriver: true,
     });
-    anim.start();
-    return () => anim.stop();
+    const slideAnim = Animated.sequence([
+      Animated.delay(400),
+      Animated.timing(completingSlideRef, {
+        toValue: screenWidth + 80,
+        duration: 1800,
+        useNativeDriver: true,
+      }),
+    ]);
+    opacityAnim.start();
+    slideAnim.start();
+    return () => {
+      opacityAnim.stop();
+      slideAnim.stop();
+    };
   }, [completingTaskId]);
 
   useEffect(() => {
     if (completingTaskId && !tasks.some(t => t.id === completingTaskId)) {
       setCompletingTaskId(null);
       completingOpacityRef.setValue(1);
+      completingSlideRef.setValue(0);
     }
   }, [completingTaskId, tasks]);
+
+  useEffect(() => {
+    if (completedTabJustUpdated) {
+      completedTabPulseRef.setValue(1);
+      Animated.sequence([
+        Animated.timing(completedTabPulseRef, {
+          toValue: 1.35,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(completedTabPulseRef, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [completedTabJustUpdated]);
 
   // Auto-expand newly created tasks
   useEffect(() => {
@@ -686,7 +723,10 @@ export default function TaskList({
           styles.taskCard,
           styles.taskCardCompleting,
           isActive && styles.taskCardActive,
-          { opacity: completingOpacityRef },
+          {
+            opacity: completingOpacityRef,
+            transform: [{ translateX: completingSlideRef }],
+          },
         ]}
       >
         {cardContent}
@@ -739,6 +779,11 @@ export default function TaskList({
                 {finishedTasks.length}
               </Text>
             </View>
+          )}
+          {completedTabJustUpdated && (
+            <Animated.View style={[styles.subtabUpdatedIcon, { transform: [{ scale: completedTabPulseRef }] }]}>
+              <Ionicons name="checkmark-circle" size={18} color={activeSubTab === 'completed' ? '#fff' : '#10b981'} />
+            </Animated.View>
           )}
         </TouchableOpacity>
       </View>
@@ -1165,6 +1210,7 @@ const styles = StyleSheet.create({
   subtabBadgeActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
   subtabBadgeText: { fontSize: 12, fontWeight: '600', color: '#6b7280' },
   subtabBadgeTextActive: { color: '#fff' },
+  subtabUpdatedIcon: { marginLeft: 4 },
 
   graveyardScroll: { flex: 1 },
   graveyardScrollContent: { padding: 16, paddingBottom: 32 },
