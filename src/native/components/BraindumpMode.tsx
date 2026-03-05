@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { useNavigation } from '@react-navigation/native';
@@ -43,6 +43,9 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
+  const [reviewTasksVisible, setReviewTasksVisible] = useState(false);
+  const [pendingTasks, setPendingTasks] = useState<{ title: string; include: boolean }[]>([]);
+  const [manualTaskTitle, setManualTaskTitle] = useState('');
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
@@ -338,14 +341,6 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     }
   };
 
-  const buildTasksFromTitles = (titles: string[]): Task[] =>
-    titles.map((title, i) => ({
-      id: `task-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
-      title: title.charAt(0).toUpperCase() + title.slice(1),
-      subtasks: [],
-      createdAt: new Date(),
-    }));
-
   const fallbackParseTitles = (text: string): string[] =>
     text
       .toLowerCase()
@@ -355,56 +350,71 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1));
 
   const parseAndCreateTasks = async (text: string) => {
-    if (processingRef.current) return; // ✅ prevents "doubles"
+    if (processingRef.current) return;
     processingRef.current = true;
     setIsProcessing(true);
 
     try {
       const titles = await transcriptToTaskTitles(text);
-      const tasks = titles.length > 0 ? buildTasksFromTitles(titles) : buildTasksFromTitles(fallbackParseTitles(text));
-      
-      // Directly create tasks instead of showing modal
-      const toAdd: Task[] = tasks.map((t) => ({
-        id: String(t.id),
-        title: String(t.title ?? ''),
-        subtasks: Array.isArray(t.subtasks)
-          ? t.subtasks.map((s) => ({ 
-              id: String(s.id), 
-              text: String(s.text ?? ''), 
-              completed: Boolean(s.completed) 
-            }))
-          : [],
-        createdAt: new Date(),
-      }));
-      
-      onTasksCreated(toAdd);
-      setTranscript('');
-      navigation.navigate('Tasks');
+      const list = titles.length > 0 ? titles : fallbackParseTitles(text);
+      setPendingTasks(list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })));
+      setReviewTasksVisible(true);
     } catch (_) {
-      const titles = fallbackParseTitles(text);
-      const tasks = buildTasksFromTitles(titles);
-      
-      // Directly create tasks instead of showing modal
-      const toAdd: Task[] = tasks.map((t) => ({
-        id: String(t.id),
-        title: String(t.title ?? ''),
-        subtasks: Array.isArray(t.subtasks)
-          ? t.subtasks.map((s) => ({ 
-              id: String(s.id), 
-              text: String(s.text ?? ''), 
-              completed: Boolean(s.completed) 
-            }))
-          : [],
-        createdAt: new Date(),
-      }));
-      
-      onTasksCreated(toAdd);
-      setTranscript('');
-      navigation.navigate('Tasks');
+      const list = fallbackParseTitles(text);
+      setPendingTasks(list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })));
+      setReviewTasksVisible(true);
     } finally {
       setIsProcessing(false);
       processingRef.current = false;
     }
+  };
+
+  const updatePendingTaskTitle = (index: number, title: string) => {
+    setPendingTasks((prev) =>
+      prev.map((p, i) => (i === index ? { ...p, title } : p))
+    );
+  };
+
+  const togglePendingTaskInclude = (index: number) => {
+    setPendingTasks((prev) =>
+      prev.map((p, i) => (i === index ? { ...p, include: !p.include } : p))
+    );
+  };
+
+  const removePendingTask = (index: number) => {
+    setPendingTasks((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const confirmAddTasks = () => {
+    const toAdd = pendingTasks.filter((p) => p.include && p.title.trim());
+    if (toAdd.length === 0) {
+      Alert.alert('No tasks selected', 'Select at least one task or edit the titles.');
+      return;
+    }
+    const tasks: Task[] = toAdd.map((p, i) => ({
+      id: `task-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+      title: p.title.trim(),
+      subtasks: [],
+      createdAt: new Date(),
+    }));
+    onTasksCreated(tasks);
+    setReviewTasksVisible(false);
+    setPendingTasks([]);
+    setTranscript('');
+    navigation.navigate('Tasks');
+  };
+
+  const cancelReview = () => {
+    setReviewTasksVisible(false);
+    setPendingTasks([]);
+    setManualTaskTitle('');
+  };
+
+  const addManualTask = () => {
+    const title = manualTaskTitle.trim();
+    if (!title) return;
+    setPendingTasks((prev) => [...prev, { title, include: true }]);
+    setManualTaskTitle('');
   };
 
 
@@ -562,6 +572,102 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
           <Text style={styles.transcribingText}>Transcribing audio...</Text>
         </View>
       )}
+
+      <Modal
+        visible={reviewTasksVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelReview}
+      >
+        <View style={styles.reviewModalBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={cancelReview}
+          />
+          <View style={styles.reviewModalCard}>
+            <View style={styles.reviewModalHeader}>
+              <Text style={styles.reviewModalTitle}>Review tasks</Text>
+              <Text style={styles.reviewModalSubtitle}>
+                Tap any task to edit. Check the ones you want to add.
+              </Text>
+              <TouchableOpacity onPress={cancelReview} style={styles.reviewModalClose} hitSlop={12}>
+                <Ionicons name="close" size={28} color="#374151" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.reviewModalScroll}
+              contentContainerStyle={styles.reviewModalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {pendingTasks.map((item, index) => (
+                <View key={index} style={[styles.reviewTaskRow, item.include && styles.reviewTaskRowEditable]}>
+                  <TouchableOpacity
+                    onPress={() => togglePendingTaskInclude(index)}
+                    style={styles.reviewCheckbox}
+                    activeOpacity={0.85}
+                  >
+                    <View style={[styles.reviewCheckboxBox, item.include && styles.reviewCheckboxBoxChecked]}>
+                      {item.include && <Ionicons name="checkmark" size={16} color="#fff" />}
+                    </View>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={[styles.reviewTaskInput, !item.include && styles.reviewTaskInputDisabled]}
+                    value={item.title}
+                    onChangeText={(t) => updatePendingTaskTitle(index, t)}
+                    placeholder="Tap to edit"
+                    placeholderTextColor="#9ca3af"
+                    editable={item.include}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    onPress={() => removePendingTask(index)}
+                    style={styles.reviewRowCloseBtn}
+                    hitSlop={8}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="close" size={18} color="#9ca3af" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={styles.reviewManualAddSection}>
+              <Text style={styles.reviewManualAddLabel}>Add a task manually</Text>
+              <View style={styles.reviewManualAddRow}>
+                <TextInput
+                  style={styles.reviewManualAddInput}
+                  value={manualTaskTitle}
+                  onChangeText={setManualTaskTitle}
+                  placeholder="Enter task..."
+                  placeholderTextColor="#9ca3af"
+                  onSubmitEditing={addManualTask}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity
+                  style={[styles.reviewManualAddBtn, !manualTaskTitle.trim() && styles.reviewManualAddBtnDisabled]}
+                  onPress={addManualTask}
+                  disabled={!manualTaskTitle.trim()}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="add" size={22} color="#fff" />
+                  <Text style={styles.reviewManualAddBtnText}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.reviewModalFooter}>
+              <TouchableOpacity
+                style={styles.reviewConfirmBtn}
+                onPress={confirmAddTasks}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add-circle" size={22} color="#fff" />
+                <Text style={styles.reviewConfirmBtnText}>Add selected to task list</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -744,6 +850,154 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   transcribingText: { fontSize: 14, color: '#1e40af', fontWeight: '500' },
+
+  reviewModalBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  reviewModalCard: {
+    width: '90%',
+    height: '85%',
+    maxHeight: 600,
+    backgroundColor: '#f5f3ff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    margin: 20,
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+  },
+  reviewModalContainer: {
+    flex: 1,
+    backgroundColor: '#f5f3ff',
+  },
+  reviewModalHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9d5ff',
+    backgroundColor: '#ede9fe',
+  },
+  reviewModalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#5b21b6',
+    marginBottom: 6,
+  },
+  reviewModalSubtitle: {
+    fontSize: 15,
+    color: '#6b21a8',
+    lineHeight: 22,
+    paddingRight: 40,
+  },
+  reviewModalClose: {
+    position: 'absolute',
+    top: 0,
+    right: 16,
+    padding: 4,
+  },
+  reviewModalScroll: { flex: 1 },
+  reviewModalScrollContent: {
+    padding: 20,
+    paddingBottom: 24,
+  },
+  reviewManualAddSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e9d5ff',
+    backgroundColor: '#ede9fe',
+  },
+  reviewManualAddLabel: { fontSize: 14, fontWeight: '600', color: '#5b21b6', marginBottom: 10 },
+  reviewManualAddRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewManualAddInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#111827',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+  },
+  reviewManualAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#9333ea',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minHeight: 48,
+  },
+  reviewManualAddBtnDisabled: { backgroundColor: '#c4b5fd', opacity: 0.8 },
+  reviewManualAddBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  reviewTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
+  },
+  reviewTaskRowEditable: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#9333ea',
+    backgroundColor: '#ede9fe',
+  },
+  reviewCheckbox: { padding: 4 },
+  reviewCheckboxBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#c4b5fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCheckboxBoxChecked: {
+    backgroundColor: '#9333ea',
+    borderColor: '#9333ea',
+  },
+  reviewTaskInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#111827',
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    minHeight: 44,
+  },
+  reviewTaskInputDisabled: {
+    color: '#9ca3af',
+  },
+  reviewRowCloseBtn: { padding: 4 },
+  reviewModalFooter: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: '#e9d5ff',
+    backgroundColor: '#ede9fe',
+  },
+  reviewConfirmBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    minHeight: 52,
+    borderRadius: 12,
+    backgroundColor: '#9333ea',
+  },
+  reviewConfirmBtnText: { fontSize: 17, fontWeight: '700', color: '#ffffff' },
 
   liveTranscript: {
     marginTop: 16,
