@@ -188,3 +188,104 @@ export async function transcriptToTaskTitles(transcript: string): Promise<string
     return lines;
   }
 }
+
+/**
+ * Use the voice transcript to edit or add subtasks for a task.
+ * Given the task title, current subtasks, and what the user said, returns the new list of subtask texts.
+ * Can add, remove, reorder, or edit. Returns a JSON array of strings.
+ */
+export async function transcriptToSubtaskEdits(
+  taskTitle: string,
+  currentSubtaskTexts: string[],
+  transcript: string
+): Promise<string[]> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error(
+      'Anthropic API key is not configured. Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file.'
+    );
+  }
+
+  const trimmed = transcript.trim();
+  if (!trimmed) return currentSubtaskTexts;
+
+  const currentList =
+    currentSubtaskTexts.length > 0
+      ? JSON.stringify(currentSubtaskTexts)
+      : 'No subtasks yet';
+
+  let response: Response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 500,
+        system: `You help the user edit subtasks for a single task using their voice instructions.
+Task title: "${taskTitle}"
+Current subtasks (in order): ${currentList}
+
+The user will speak instructions to add, remove, reorder, or edit these subtasks. Interpret their intent and output the final list of subtask texts only.
+- Reply with a JSON array of strings, one per subtask, in the order they should appear.
+- No numbering, no explanation. Example: ["Open the file", "Write one sentence", "Save"].
+- If they say to add something, append it. If they say to remove one, omit it. If they reorder or rephrase, reflect that.`,
+        messages: [
+          {
+            role: 'user',
+            content: `User said: "${trimmed}"\n\nOutput the new subtasks list as a JSON array of strings:`,
+          },
+        ],
+      }),
+    });
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(`Network error: ${msg}. Check your connection.`);
+  }
+
+  const body = await response.text();
+
+  if (!response.ok) {
+    let message = `API error ${response.status}`;
+    try {
+      const j = JSON.parse(body) as { error?: { message?: string; type?: string } };
+      if (j.error?.message) message = j.error.message;
+      else if (j.error?.type) message = `${j.error.type}: ${message}`;
+    } catch (_) {
+      if (body.length < 200) message = body || message;
+    }
+    throw new Error(message);
+  }
+
+  let data: { content?: Array<{ type: string; text?: string }> };
+  try {
+    data = JSON.parse(body) as { content?: Array<{ type: string; text?: string }> };
+  } catch (_) {
+    throw new Error('Invalid response from API');
+  }
+  const raw = data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
+
+  let json = raw;
+  const codeMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeMatch) json = codeMatch[1].trim();
+
+  try {
+    const arr = JSON.parse(json) as unknown;
+    if (!Array.isArray(arr)) return currentSubtaskTexts;
+    const strings = arr
+      .filter((x): x is string => typeof x === 'string')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    return strings;
+  } catch (_) {
+    const lines = raw
+      .split(/\n/)
+      .map((s) => s.replace(/^[\d\-*.]+\s*/, '').trim())
+      .filter((s) => s.length > 0);
+    return lines.length > 0 ? lines : currentSubtaskTexts;
+  }
+}

@@ -1,10 +1,17 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import type { Task, GameState, FinishedTask, Subtask } from '../../../App.native';
 import { format } from 'date-fns';
-import { generateSubtasks, isSplitTaskAvailable } from '../services/splitTask';
+import { generateSubtasks, isSplitTaskAvailable, transcriptToSubtaskEdits } from '../services/splitTask';
+import {
+  requestMicrophonePermission,
+  startRecording,
+  stopRecording,
+} from '../services/audioRecording';
+import { transcribeAudio, isTranscriptionAvailable } from '../services/transcription';
 
 type TasksSubTab = 'current' | 'completed';
 
@@ -39,12 +46,29 @@ export default function TaskList({
   const [editingTaskTitleId, setEditingTaskTitleId] = useState<string | null>(null);
   const [draftTaskTitle, setDraftTaskTitle] = useState('');
 
+  const [voiceTask, setVoiceTask] = useState<Task | null>(null);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceTranscribing, setVoiceTranscribing] = useState(false);
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceRecordingRef = useRef<Audio.Recording | null>(null);
+
+  const [addSubtaskFocusedTaskId, setAddSubtaskFocusedTaskId] = useState<string | null>(null);
+  const [subtaskSuggestions, setSubtaskSuggestions] = useState<Record<string, string[]>>({});
+  const [subtaskSuggestionsLoading, setSubtaskSuggestionsLoading] = useState<string | null>(null);
+  const [showChooseTaskForSubtaskHelper, setShowChooseTaskForSubtaskHelper] = useState(false);
+
   const [orderedIds, setOrderedIds] = useState<string[]>(() => tasks.map(t => t.id));
   const prevTaskCountRef = useRef(tasks.length);
 
   useEffect(() => {
     setOrderedIds(tasks.map(t => t.id));
   }, [tasks]);
+
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidHide', () => setAddSubtaskFocusedTaskId(null));
+    return () => sub.remove();
+  }, []);
 
   // Auto-expand newly created tasks
   useEffect(() => {
@@ -95,59 +119,42 @@ export default function TaskList({
     if (!text) return;
     onAddSubtask(taskId, text);
     setNewSubtaskText(prev => ({ ...prev, [taskId]: '' }));
+    setSubtaskSuggestions(prev => ({
+      ...prev,
+      [taskId]: (prev[taskId] || []).filter(s => s !== text),
+    }));
   };
 
-  const moveSubtaskUp = (taskId: string, subtaskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const currentIndex = task.subtasks.findIndex(s => s.id === subtaskId);
-    if (currentIndex <= 0) return; // Already at top
-    
-    const newSubtasks = [...task.subtasks];
-    [newSubtasks[currentIndex - 1], newSubtasks[currentIndex]] = [newSubtasks[currentIndex], newSubtasks[currentIndex - 1]];
-    onUpdateTask(taskId, { subtasks: newSubtasks });
-  };
+  const fetchSubtaskSuggestions = useCallback(async (task: Task) => {
+    if (!isSplitTaskAvailable() || subtaskSuggestionsLoading) return;
+    const existingTexts = new Set(task.subtasks.map(s => s.text.trim().toLowerCase()));
+    if ((subtaskSuggestions[task.id] || []).length > 0) return;
+    setSubtaskSuggestionsLoading(task.id);
+    try {
+      const labels = await generateSubtasks(task.title);
+      const filtered = labels.filter(t => t.trim() && !existingTexts.has(t.trim().toLowerCase())).slice(0, 5);
+      setSubtaskSuggestions(prev => ({ ...prev, [task.id]: filtered }));
+    } catch (_) {
+      setSubtaskSuggestions(prev => ({ ...prev, [task.id]: [] }));
+    } finally {
+      setSubtaskSuggestionsLoading(null);
+    }
+  }, [subtaskSuggestionsLoading, subtaskSuggestions]);
 
-  const moveSubtaskDown = (taskId: string, subtaskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const currentIndex = task.subtasks.findIndex(s => s.id === subtaskId);
-    if (currentIndex < 0 || currentIndex >= task.subtasks.length - 1) return; // Already at bottom
-    
-    const newSubtasks = [...task.subtasks];
-    [newSubtasks[currentIndex], newSubtasks[currentIndex + 1]] = [newSubtasks[currentIndex + 1], newSubtasks[currentIndex]];
-    onUpdateTask(taskId, { subtasks: newSubtasks });
-  };
+  const addSuggestionSubtask = useCallback((taskId: string, text: string) => {
+    onAddSubtask(taskId, text);
+    setSubtaskSuggestions(prev => ({
+      ...prev,
+      [taskId]: (prev[taskId] || []).filter(s => s !== text),
+    }));
+  }, [onAddSubtask]);
 
-  const moveTaskUp = (taskId: string) => {
-    const currentIndex = orderedIds.findIndex(id => id === taskId);
-    if (currentIndex <= 0) return; // Already at top
-    
-    const newOrderedIds = [...orderedIds];
-    [newOrderedIds[currentIndex - 1], newOrderedIds[currentIndex]] = 
-      [newOrderedIds[currentIndex], newOrderedIds[currentIndex - 1]];
-    setOrderedIds(newOrderedIds);
-    
-    const reorderedTasks = newOrderedIds
-      .map(id => tasksById.get(id))
-      .filter((t): t is Task => t != null);
-    onReorderTasks?.(reorderedTasks);
-  };
-
-  const moveTaskDown = (taskId: string) => {
-    const currentIndex = orderedIds.findIndex(id => id === taskId);
-    if (currentIndex < 0 || currentIndex >= orderedIds.length - 1) return; // Already at bottom
-    
-    const newOrderedIds = [...orderedIds];
-    [newOrderedIds[currentIndex], newOrderedIds[currentIndex + 1]] = 
-      [newOrderedIds[currentIndex + 1], newOrderedIds[currentIndex]];
-    setOrderedIds(newOrderedIds);
-    
-    const reorderedTasks = newOrderedIds
-      .map(id => tasksById.get(id))
-      .filter((t): t is Task => t != null);
-    onReorderTasks?.(reorderedTasks);
-  };
+  const removeSuggestion = useCallback((taskId: string, text: string) => {
+    setSubtaskSuggestions(prev => ({
+      ...prev,
+      [taskId]: (prev[taskId] || []).filter(s => s !== text),
+    }));
+  }, []);
 
   const handleCompletePress = (task: Task) => {
     setTaskToComplete(task);
@@ -199,6 +206,111 @@ export default function TaskList({
     }
   };
 
+  const openSubtaskHelper = (task: Task) => {
+    if (!isSplitTaskAvailable()) {
+      Alert.alert(
+        'API key required',
+        'Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file to use the voice subtask helper.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    if (!isTranscriptionAvailable()) {
+      Alert.alert(
+        'Voice not available',
+        'Add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file to use voice.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    setVoiceTask(task);
+    setVoiceError(null);
+  };
+
+  const openSubtaskHelperFloating = () => {
+    if (!isSplitTaskAvailable()) {
+      Alert.alert(
+        'API key required',
+        'Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file to use the subtasks helper.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    if (!isTranscriptionAvailable()) {
+      Alert.alert(
+        'Voice not available',
+        'Add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file to use voice.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    setShowChooseTaskForSubtaskHelper(true);
+  };
+
+  const startVoiceRecording = async () => {
+    const task = voiceTask;
+    if (!task) return;
+    setVoiceError(null);
+    try {
+      const granted = await requestMicrophonePermission();
+      if (!granted) {
+        setVoiceError('Microphone permission is required.');
+        return;
+      }
+      const recording = await startRecording();
+      voiceRecordingRef.current = recording;
+      setVoiceRecording(true);
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : 'Failed to start recording.');
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    if (!voiceRecordingRef.current) {
+      setVoiceRecording(false);
+      return;
+    }
+    const task = voiceTask;
+    setVoiceRecording(false);
+    try {
+      const uri = await stopRecording(voiceRecordingRef.current);
+      voiceRecordingRef.current = null;
+      if (!uri || !task) return;
+      setVoiceTranscribing(true);
+      setVoiceError(null);
+      const transcript = await transcribeAudio(uri);
+      setVoiceTranscribing(false);
+      if (!transcript.trim()) {
+        setVoiceError('No speech detected. Try again.');
+        return;
+      }
+      setVoiceProcessing(true);
+      const currentTexts = task.subtasks.map((s) => s.text);
+      const newTexts = await transcriptToSubtaskEdits(task.title, currentTexts, transcript);
+      const newSubtasks: Subtask[] = newTexts.map((text, i) => ({
+        id: `${task.id}-sub-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+        text,
+        completed: false,
+      }));
+      onUpdateTask(task.id, { subtasks: newSubtasks });
+      setVoiceTask(null);
+      setVoiceProcessing(false);
+      if (!expandedTasks.has(task.id)) toggleExpanded(task.id);
+    } catch (err) {
+      setVoiceTranscribing(false);
+      setVoiceProcessing(false);
+      setVoiceError(err instanceof Error ? err.message : 'Something went wrong.');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (voiceRecordingRef.current) {
+        voiceRecordingRef.current.stopAndUnloadAsync().catch(() => {});
+      }
+    };
+  }, []);
+
   const totalSubtasks = tasks.reduce((acc, task) => acc + task.subtasks.length, 0);
   const completedSubtasks = tasks.reduce((acc, task) =>
     acc + task.subtasks.filter(s => s.completed).length, 0);
@@ -213,46 +325,18 @@ export default function TaskList({
 
   const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<Task>) => {
     const task = item;
+    const taskNumber = orderedIds.findIndex(id => id === task.id) + 1;
     const isExpanded = expandedTasks.has(task.id);
     const doneCount = task.subtasks.filter(s => s.completed).length;
     const totalCount = task.subtasks.length;
     const isCompleted = totalCount > 0 && doneCount === totalCount;
     const isEditingTitle = editingTaskTitleId === task.id;
     
-    const currentIndex = orderedIds.findIndex(id => id === task.id);
-    const canMoveUp = currentIndex > 0;
-    const canMoveDown = currentIndex >= 0 && currentIndex < orderedIds.length - 1;
-
     return (
       <View style={[styles.taskCard, isCompleted && styles.taskCardCompleted, isActive && styles.taskCardActive]}>
         <View style={styles.taskHeader}>
-          <View style={styles.taskReorderButtons}>
-            <TouchableOpacity
-              onPress={() => moveTaskUp(task.id)}
-              disabled={!canMoveUp}
-              style={[styles.taskArrowButton, !canMoveUp && styles.taskArrowButtonDisabled]}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="chevron-up" size={14} color={canMoveUp ? "#fff" : "#9ca3af"} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => moveTaskDown(task.id)}
-              disabled={!canMoveDown}
-              style={[styles.taskArrowButton, !canMoveDown && styles.taskArrowButtonDisabled]}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="chevron-down" size={14} color={canMoveDown ? "#fff" : "#9ca3af"} />
-            </TouchableOpacity>
-          </View>
-          
-          <TouchableOpacity
-            onPress={() => handleCompletePress(task)}
-            style={styles.taskCheckboxHit}
-            activeOpacity={0.85}
-          >
-            <View style={[styles.taskCheckbox, isCompleted && styles.taskCheckboxChecked]}>
-              {isCompleted && <Ionicons name="checkmark" size={12} color="#fff" />}
-            </View>
+          <TouchableOpacity onLongPress={drag} style={styles.taskDragHandle} activeOpacity={0.8}>
+            <Ionicons name="reorder-two" size={20} color="#9ca3af" />
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -265,26 +349,41 @@ export default function TaskList({
             activeOpacity={0.85}
           >
             {isEditingTitle ? (
-              <TextInput
-                style={styles.taskTitleInput}
-                value={draftTaskTitle}
-                onChangeText={setDraftTaskTitle}
-                onSubmitEditing={() => submitTaskTitleEdit(task.id)}
-                onBlur={() => submitTaskTitleEdit(task.id)}
-                autoFocus
-                selectTextOnFocus
-                placeholder="Task title"
-                placeholderTextColor="#9ca3af"
-              />
+              <View style={styles.taskTitleRow}>
+                <Text style={styles.taskNumberPrefix}>{taskNumber}.</Text>
+                <TextInput
+                  style={styles.taskTitleInput}
+                  value={draftTaskTitle}
+                  onChangeText={setDraftTaskTitle}
+                  onSubmitEditing={() => submitTaskTitleEdit(task.id)}
+                  onBlur={() => submitTaskTitleEdit(task.id)}
+                  autoFocus
+                  selectTextOnFocus
+                  placeholder="Task title"
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
             ) : (
               <Text style={styles.taskTitle}>
-                {task.title}
+                {taskNumber}. {task.title}
               </Text>
             )}
             {totalCount > 0 && (
               <Text style={styles.taskMeta}>
                 {doneCount}/{totalCount} complete
               </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => handleCompletePress(task)}
+            style={[styles.completeButton, isCompleted && styles.completeButtonDone]}
+            activeOpacity={0.85}
+          >
+            {isCompleted ? (
+              <Ionicons name="checkmark-circle" size={26} color="#10b981" />
+            ) : (
+              <Text style={styles.completeButtonText}>Mark as complete</Text>
             )}
           </TouchableOpacity>
 
@@ -299,23 +398,6 @@ export default function TaskList({
 
         {isExpanded && (
           <View style={styles.subtasksContainer}>
-            <View style={styles.taskActionsRow}>
-              <View style={styles.taskActionButtonPlaceholder} />
-              {splittingTaskId === task.id ? (
-                <View style={styles.taskActionButton}>
-                  <ActivityIndicator size="small" color="#9333ea" />
-                </View>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => handleSplitTask(task)}
-                  style={styles.taskActionButton}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.taskActionButtonText}>Split into subtasks</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
             <DraggableFlatList<Subtask>
               data={task.subtasks}
               keyExtractor={(s) => s.id}
@@ -325,10 +407,9 @@ export default function TaskList({
               renderItem={({ item: subtask, drag, isActive }) => {
                 const isEditingSubtask =
                   editingSubtask?.taskId === task.id && editingSubtask?.subtaskId === subtask.id;
-                const currentIndex = task.subtasks.findIndex(s => s.id === subtask.id);
-                const canMoveUp = currentIndex > 0;
-                const canMoveDown = currentIndex < task.subtasks.length - 1;
-                const isLastSubtask = currentIndex === task.subtasks.length - 1;
+                const subtaskIndex = task.subtasks.findIndex(s => s.id === subtask.id);
+                const subtaskNumber = subtaskIndex + 1;
+                const isLastSubtask = subtaskIndex === task.subtasks.length - 1;
                 return (
                   <View
                     style={[
@@ -338,37 +419,25 @@ export default function TaskList({
                       isLastSubtask && styles.subtaskLast,
                     ]}
                   >
-                    <View style={styles.subtaskReorderButtons}>
-                      <TouchableOpacity
-                        onPress={() => moveSubtaskUp(task.id, subtask.id)}
-                        disabled={!canMoveUp}
-                        style={[styles.subtaskArrowButton, !canMoveUp && styles.subtaskArrowButtonDisabled]}
-                        activeOpacity={0.85}
-                      >
-                        <Ionicons name="chevron-up" size={14} color={canMoveUp ? "#9333ea" : "#9ca3af"} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => moveSubtaskDown(task.id, subtask.id)}
-                        disabled={!canMoveDown}
-                        style={[styles.subtaskArrowButton, !canMoveDown && styles.subtaskArrowButtonDisabled]}
-                        activeOpacity={0.85}
-                      >
-                        <Ionicons name="chevron-down" size={14} color={canMoveDown ? "#9333ea" : "#9ca3af"} />
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity onLongPress={drag} style={styles.subtaskDragHandle} activeOpacity={0.8}>
+                      <Ionicons name="reorder-two" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
                     {isEditingSubtask ? (
                       <>
-                        <TextInput
-                          style={styles.subtaskEditInput}
-                          value={draftSubtaskText}
-                          onChangeText={setDraftSubtaskText}
-                          onSubmitEditing={() => submitEditSubtask(task)}
-                          onBlur={() => submitEditSubtask(task)}
-                          autoFocus
-                          selectTextOnFocus
-                          multiline
-                          numberOfLines={3}
-                        />
+                        <View style={styles.subtaskTitleRow}>
+                          <Text style={styles.subtaskNumberPrefix}>{subtaskNumber}.</Text>
+                          <TextInput
+                            style={styles.subtaskEditInput}
+                            value={draftSubtaskText}
+                            onChangeText={setDraftSubtaskText}
+                            onSubmitEditing={() => submitEditSubtask(task)}
+                            onBlur={() => submitEditSubtask(task)}
+                            autoFocus
+                            selectTextOnFocus
+                            multiline
+                            numberOfLines={3}
+                          />
+                        </View>
                         <TouchableOpacity
                           onPress={() => {
                             onUpdateTask(task.id, {
@@ -406,7 +475,7 @@ export default function TaskList({
                           activeOpacity={0.85}
                         >
                           <Text style={[styles.subtaskText, subtask.completed && styles.subtaskTextCompleted]}>
-                            {subtask.text}
+                            {subtaskNumber}. {subtask.text}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -435,6 +504,11 @@ export default function TaskList({
                 placeholder="add subtask"
                 onSubmitEditing={() => handleAddSubtask(task.id)}
                 returnKeyType="done"
+                onFocus={() => {
+                  setAddSubtaskFocusedTaskId(task.id);
+                  fetchSubtaskSuggestions(task);
+                }}
+                onBlur={() => setAddSubtaskFocusedTaskId(null)}
               />
               <TouchableOpacity
                 style={[styles.addButton, !(newSubtaskText[task.id]?.trim()) && styles.addButtonDisabled]}
@@ -445,11 +519,61 @@ export default function TaskList({
                 <Ionicons name="add" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
+            {addSubtaskFocusedTaskId === task.id && isSplitTaskAvailable() && (
+              <View style={styles.suggestionsPopup}>
+                <View style={styles.suggestionsPopupHeader}>
+                  <Text style={styles.suggestionsTitle}>Suggestions</Text>
+                  <TouchableOpacity
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    onPress={() => setAddSubtaskFocusedTaskId(null)}
+                    style={styles.suggestionsCloseButton}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="close" size={22} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+                {subtaskSuggestionsLoading === task.id ? (
+                  <View style={styles.suggestionsLoadingRow}>
+                    <ActivityIndicator size="small" color="#9333ea" />
+                    <Text style={styles.suggestionsLoadingText}>Suggesting subtasks...</Text>
+                  </View>
+                ) : (() => {
+                  const existingSet = new Set(task.subtasks.map(s => s.text.trim().toLowerCase()));
+                  const fullList = (subtaskSuggestions[task.id] || []).filter(s => !existingSet.has(s.trim().toLowerCase()));
+                  const list = fullList.slice(0, 3);
+                  if (list.length === 0) return null;
+                  return (
+                    <>
+                      {list.map((suggestion, idx) => (
+                        <View key={idx} style={styles.suggestionChip}>
+                          <TouchableOpacity
+                            style={styles.suggestionChipMain}
+                            onPress={() => addSuggestionSubtask(task.id, suggestion)}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="add-circle-outline" size={18} color="#9333ea" />
+                            <Text style={styles.suggestionChipText}>{suggestion}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            onPress={() => removeSuggestion(task.id, suggestion)}
+                            style={styles.suggestionChipClose}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons name="close" size={18} color="#9ca3af" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </>
+                  );
+                })()}
+              </View>
+            )}
           </View>
         )}
       </View>
     );
-  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, moveSubtaskUp, moveSubtaskDown, moveTaskUp, moveTaskDown, orderedIds, tasksById, onReorderTasks]);
+  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion]);
 
   if (tasks.length === 0 && finishedTasks.length === 0) {
     return (
@@ -530,6 +654,102 @@ export default function TaskList({
       )}
 
 
+      {activeSubTab === 'current' && tasks.length > 0 && (
+        <TouchableOpacity
+          style={styles.subtaskHelperFloating}
+          onPress={openSubtaskHelperFloating}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="mic" size={22} color="#fff" />
+          <Text style={styles.subtaskHelperFloatingText}>Subtasks helper</Text>
+        </TouchableOpacity>
+      )}
+
+      <Modal
+        visible={showChooseTaskForSubtaskHelper}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowChooseTaskForSubtaskHelper(false)}
+      >
+        <TouchableOpacity
+          style={styles.completeModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowChooseTaskForSubtaskHelper(false)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} style={styles.chooseTaskModalCard}>
+            <Text style={styles.subtaskHelperModalTitle}>Choose a task</Text>
+            <Text style={styles.subtaskHelperModalMessage}>Tap a task to edit its subtasks with voice.</Text>
+            <ScrollView style={styles.chooseTaskModalList} nestedScrollEnabled>
+              {orderedTasks.map((t, index) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={styles.chooseTaskModalRow}
+                  onPress={() => {
+                    setShowChooseTaskForSubtaskHelper(false);
+                    setVoiceTask(t);
+                    setVoiceError(null);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.chooseTaskModalNumber}>{index + 1}.</Text>
+                  <Text style={styles.chooseTaskRowTitle} numberOfLines={2}>{t.title}</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.subtaskHelperCancel}
+              onPress={() => setShowChooseTaskForSubtaskHelper(false)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={voiceTask !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!voiceRecording && !voiceTranscribing && !voiceProcessing) setVoiceTask(null); }}
+      >
+        <TouchableOpacity
+          style={styles.completeModalOverlay}
+          activeOpacity={1}
+          onPress={() => { if (!voiceRecording && !voiceTranscribing && !voiceProcessing) setVoiceTask(null); }}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} style={styles.voiceModalCard}>
+            <Text style={styles.subtaskHelperModalTitle}>Voice agent</Text>
+            <Text style={styles.subtaskHelperModalMessage}>
+              Tell me how to edit or add subtasks for "{voiceTask?.title}". Tap to record, then tap again to stop.
+            </Text>
+            {voiceError ? <Text style={styles.voiceErrorText}>{voiceError}</Text> : null}
+            {voiceTranscribing && <Text style={styles.voiceStatusText}>Transcribing...</Text>}
+            {voiceProcessing && <Text style={styles.voiceStatusText}>Updating subtasks...</Text>}
+            {!voiceTranscribing && !voiceProcessing && (
+              <TouchableOpacity
+                style={[styles.voiceRecordButton, voiceRecording && styles.voiceRecordButtonActive]}
+                onPress={voiceRecording ? stopVoiceRecording : startVoiceRecording}
+                activeOpacity={0.85}
+              >
+                <Ionicons name={voiceRecording ? 'stop' : 'mic'} size={36} color="#fff" />
+                <Text style={styles.voiceRecordButtonText}>{voiceRecording ? 'Tap to stop' : 'Tap to record'}</Text>
+              </TouchableOpacity>
+            )}
+            {!voiceRecording && !voiceTranscribing && !voiceProcessing && (
+              <TouchableOpacity
+                style={styles.subtaskHelperCancel}
+                onPress={() => setVoiceTask(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal
         visible={taskToComplete !== null}
         transparent
@@ -600,6 +820,109 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 12,
   },
+  subtaskHelperModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  subtaskHelperModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+    marginBottom: 8,
+  },
+  subtaskHelperModalMessage: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  subtaskHelperOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#f5f3ff',
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  subtaskHelperOptionText: { fontSize: 15, fontWeight: '600', color: '#1f2937', flex: 1 },
+  subtaskHelperCancel: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  subtaskHelperCancelText: { fontSize: 15, fontWeight: '600', color: '#6b7280' },
+  suggestModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  suggestModalLoading: { alignItems: 'center', paddingVertical: 32 },
+  suggestModalLoadingText: { fontSize: 14, color: '#6b7280', marginTop: 12 },
+  suggestModalList: { maxHeight: 240, marginVertical: 12 },
+  suggestModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  suggestModalCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestModalCheckboxChecked: { backgroundColor: '#9333ea', borderColor: '#9333ea' },
+  suggestModalRowText: { fontSize: 15, color: '#1f2937', flex: 1 },
+  suggestModalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 8 },
+  voiceModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  voiceErrorText: { fontSize: 13, color: '#dc2626', marginBottom: 12, textAlign: 'center' },
+  voiceStatusText: { fontSize: 14, color: '#6b7280', marginBottom: 12 },
+  voiceRecordButton: {
+    backgroundColor: '#9333ea',
+    paddingVertical: 20,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  voiceRecordButtonActive: { backgroundColor: '#dc2626' },
+  voiceRecordButtonText: { fontSize: 15, fontWeight: '600', color: '#fff', marginTop: 8 },
   completeModalIconWrap: {
     width: 80,
     height: 80,
@@ -741,31 +1064,9 @@ const styles = StyleSheet.create({
 
   dragHandle: { paddingTop: 1, paddingRight: 4 },
   expandHit: { paddingTop: 2, paddingHorizontal: 4 },
-  taskReorderButtons: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 2,
-    marginRight: 4,
-    marginLeft: 8,
-    paddingTop: 2,
-  },
-  taskArrowButton: {
-    padding: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 28,
-    minHeight: 24,
-    backgroundColor: '#9333ea',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#9333ea',
-  },
-  taskArrowButtonDisabled: { 
-    opacity: 0.5,
-    backgroundColor: '#f3f4f6',
-    borderColor: '#e5e7eb',
-  },
+  taskDragHandle: { padding: 4, justifyContent: 'center', marginRight: 4 },
+  taskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  taskNumberPrefix: { fontSize: 16, fontWeight: '600', color: '#6b7280' },
   taskCheckboxHit: { paddingTop: 4, paddingBottom: 4, paddingRight: 4, paddingLeft: 8 },
   taskCheckbox: {
     width: 20,
@@ -847,15 +1148,71 @@ const styles = StyleSheet.create({
 
   taskHeaderContent: { flex: 1, gap: 6 },
   taskTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
-  taskTitleInput: { fontSize: 16, fontWeight: '600', color: '#1f2937', paddingVertical: 2, paddingHorizontal: 0, borderBottomWidth: 1, borderBottomColor: '#9333ea' },
+  taskTitleInput: { fontSize: 16, fontWeight: '600', color: '#1f2937', paddingVertical: 2, paddingHorizontal: 0, flex: 1, borderBottomWidth: 1, borderBottomColor: '#9333ea' },
   taskTitleTouchable: { alignSelf: 'stretch' },
   taskMeta: { fontSize: 12, color: '#6b7280' },
+
+  completeButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  completeButtonDone: { backgroundColor: 'transparent' },
+  completeButtonText: { fontSize: 13, fontWeight: '600', color: '#9333ea' },
 
   editTasksFloating: { position: 'absolute', bottom: 24, right: 20 },
   editTasksButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#ede9fe' },
   editTasksButtonActive: { backgroundColor: '#9333ea' },
   editTasksButtonText: { fontSize: 14, fontWeight: '600', color: '#9333ea' },
   editTasksButtonTextActive: { color: '#fff' },
+
+  subtaskHelperFloating: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#9333ea',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  subtaskHelperFloatingText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+
+  chooseTaskModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '80%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  chooseTaskModalList: { maxHeight: 320 },
+  chooseTaskModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  chooseTaskModalNumber: { fontSize: 15, fontWeight: '600', color: '#6b7280', minWidth: 24 },
+  chooseTaskRowTitle: { flex: 1, fontSize: 15, fontWeight: '500', color: '#1f2937' },
 
   subtasksContainer: {
     padding: 0,
@@ -881,33 +1238,11 @@ const styles = StyleSheet.create({
   subtaskDragging: { opacity: 0.9 },
   subtaskReorderWrap: { flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 },
   subtaskReorderBtn: { padding: 4, justifyContent: 'center', alignItems: 'center' },
-  subtaskReorderButtons: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 2,
-    marginRight: 4,
-    paddingTop: 2,
-  },
-  subtaskArrowButton: {
-    padding: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 28,
-    minHeight: 24,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  subtaskArrowButtonDisabled: { 
-    opacity: 0.5,
-    backgroundColor: '#f9fafb',
-    borderColor: '#e5e7eb',
-  },
   subtaskCheckboxHit: { paddingTop: 2, paddingBottom: 4, paddingRight: 4, paddingLeft: 0 },
   subtaskTrashHit: { padding: 4, justifyContent: 'center' },
   subtaskDeleteButton: { padding: 4, justifyContent: 'center', alignItems: 'center' },
+  subtaskTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, flex: 1 },
+  subtaskNumberPrefix: { fontSize: 14, fontWeight: '500', color: '#6b7280' },
   subtaskTextHit: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   subtaskEditInput: {
     flex: 1,
@@ -967,6 +1302,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   addButtonDisabled: { opacity: 0.5 },
+
+  suggestionsPopup: {
+    marginTop: 0,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f5f3ff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e9e5ff',
+  },
+  suggestionsPopupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  suggestionsCloseButton: { padding: 4 },
+  suggestionsTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  suggestionsLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  suggestionsLoadingText: { fontSize: 13, color: '#6b7280' },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingRight: 4,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  suggestionChipMain: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  suggestionChipClose: { padding: 4 },
+  suggestionChipText: { fontSize: 14, color: '#1f2937', fontWeight: '500', flex: 1 },
 
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
   emptyCard: { alignItems: 'center', gap: 12 },
