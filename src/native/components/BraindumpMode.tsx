@@ -20,7 +20,6 @@ type NavigationProp = BottomTabNavigationProp<{
   Braindump: undefined;
   Tasks: undefined;
   Buddy: undefined;
-  Stats: undefined;
 }>;
 import {
   requestMicrophonePermission,

@@ -27,7 +27,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import BraindumpMode from "./src/native/components/BraindumpMode";
 import TaskList from "./src/native/components/TaskList";
 import AvatarCompanion from "./src/native/components/AvatarCompanion";
-import GameStats from "./src/native/components/GameStats";
 import Header from "./src/native/components/Header";
 
 // Error Boundary Component
@@ -467,27 +466,6 @@ export default function App() {
                       onReorderTasks={reorderTasks}
                       completedTabJustUpdated={completedTabJustUpdated}
                       gameState={gameState}
-                    />
-                  )}
-                </Tab.Screen>
-
-                <Tab.Screen
-                  name="Stats"
-                  options={{
-                    tabBarIcon: ({ color, size }) => (
-                      <Ionicons
-                        name="trophy-outline"
-                        size={size}
-                        color={color}
-                      />
-                    ),
-                  }}
-                >
-                  {() => (
-                    <GameStats
-                      gameState={gameState}
-                      tasks={tasks}
-                      finishedTasks={finishedTasks}
                     />
                   )}
                 </Tab.Screen>
