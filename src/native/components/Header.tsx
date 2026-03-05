@@ -10,7 +10,7 @@ export default function Header({ gameState }: HeaderProps) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <Text style={styles.title}>MindFlow</Text>
+        <Text style={styles.title}>TaskDump</Text>
       </View>
     </SafeAreaView>
   );
