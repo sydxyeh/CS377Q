@@ -349,8 +349,14 @@ export default function App() {
     };
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     setFinishedTasks((prev) => [finished, ...prev]);
+  };
+
+  const completeTaskWithCelebration = (task: Task) => {
     setShowConfetti(true);
-    setTimeout(() => setShowConfetti(false), 2500);
+    setTimeout(() => {
+      completeTask(task.id);
+      setShowConfetti(false);
+    }, 2600);
   };
 
   const toggleSubtask = (taskId: string, subtaskId: string) => {
@@ -453,6 +459,7 @@ export default function App() {
                       onToggleSubtask={toggleSubtask}
                       onAddSubtask={addSubtask}
                       onCompleteTask={completeTask}
+                      onConfirmCompleteTask={completeTaskWithCelebration}
                       onUpdateTask={updateTask}
                       onReorderTasks={reorderTasks}
                       gameState={gameState}

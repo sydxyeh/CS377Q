@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator, Modal, Keyboard, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
@@ -21,6 +21,7 @@ interface TaskListProps {
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onAddSubtask: (taskId: string, text: string) => void;
   onCompleteTask: (taskId: string) => void;
+  onConfirmCompleteTask?: (task: Task) => void;
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
   onReorderTasks?: (reordered: Task[]) => void;
   gameState: GameState;
@@ -32,6 +33,7 @@ export default function TaskList({
   onToggleSubtask,
   onAddSubtask,
   onCompleteTask,
+  onConfirmCompleteTask,
   onUpdateTask,
   onReorderTasks,
   gameState
@@ -43,6 +45,8 @@ export default function TaskList({
   const [editingSubtask, setEditingSubtask] = useState<{ taskId: string; subtaskId: string } | null>(null);
   const [draftSubtaskText, setDraftSubtaskText] = useState('');
   const [taskToComplete, setTaskToComplete] = useState<Task | null>(null);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const completingOpacityRef = useRef(new Animated.Value(1)).current;
   const [editingTaskTitleId, setEditingTaskTitleId] = useState<string | null>(null);
   const [draftTaskTitle, setDraftTaskTitle] = useState('');
 
@@ -71,6 +75,25 @@ export default function TaskList({
     const sub = Keyboard.addListener('keyboardDidHide', () => setAddSubtaskFocusedTaskId(null));
     return () => sub.remove();
   }, []);
+
+  useEffect(() => {
+    if (!completingTaskId) return;
+    completingOpacityRef.setValue(1);
+    const anim = Animated.timing(completingOpacityRef, {
+      toValue: 0.72,
+      duration: 600,
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [completingTaskId]);
+
+  useEffect(() => {
+    if (completingTaskId && !tasks.some(t => t.id === completingTaskId)) {
+      setCompletingTaskId(null);
+      completingOpacityRef.setValue(1);
+    }
+  }, [completingTaskId, tasks]);
 
   // Auto-expand newly created tasks
   useEffect(() => {
@@ -392,9 +415,10 @@ export default function TaskList({
     const totalCount = task.subtasks.length;
     const isCompleted = totalCount > 0 && doneCount === totalCount;
     const isEditingTitle = editingTaskTitleId === task.id;
+    const isCompleting = completingTaskId === task.id;
     
-    return (
-      <View style={[styles.taskCard, isCompleted && styles.taskCardCompleted, isActive && styles.taskCardActive]}>
+    const cardContent = (
+      <>
         <View style={styles.taskHeader}>
           <TouchableOpacity onLongPress={drag} style={styles.taskDragHandle} activeOpacity={0.8}>
             <Ionicons name="reorder-two" size={20} color="#9ca3af" />
@@ -402,10 +426,12 @@ export default function TaskList({
 
           <TouchableOpacity 
             style={styles.taskHeaderContent} 
-            onPress={() => toggleExpanded(task.id)} 
+            onPress={() => !isCompleting && toggleExpanded(task.id)} 
             onLongPress={() => {
-              setEditingTaskTitleId(task.id);
-              setDraftTaskTitle(task.title);
+              if (!isCompleting) {
+                setEditingTaskTitleId(task.id);
+                setDraftTaskTitle(task.title);
+              }
             }}
             activeOpacity={0.85}
           >
@@ -425,30 +451,35 @@ export default function TaskList({
                 />
               </View>
             ) : (
-              <Text style={styles.taskTitle}>
+              <Text style={[styles.taskTitle, isCompleting && styles.taskTitleCompleting]}>
                 {taskNumber}. {task.title}
               </Text>
             )}
-            {totalCount > 0 && (
+            {totalCount > 0 && !isCompleting && (
               <Text style={styles.taskMeta}>
                 {doneCount}/{totalCount} complete
               </Text>
             )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => handleCompletePress(task)}
-            style={[styles.completeButton, isCompleted && styles.completeButtonDone]}
-            activeOpacity={0.85}
-          >
-            {isCompleted ? (
-              <Ionicons name="checkmark-circle" size={26} color="#10b981" />
-            ) : (
-              <Text style={styles.completeButtonText}>Mark as complete</Text>
+            {isCompleting && (
+              <Text style={styles.taskMovingLabel}>Moving to completed ✓</Text>
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.expandHit} onPress={() => toggleExpanded(task.id)} activeOpacity={0.8}>
+          {!isCompleting && (
+            <TouchableOpacity
+              onPress={() => handleCompletePress(task)}
+              style={[styles.completeButton, isCompleted && styles.completeButtonDone]}
+              activeOpacity={0.85}
+            >
+              {isCompleted ? (
+                <Ionicons name="checkmark-circle" size={26} color="#10b981" />
+              ) : (
+                <Text style={styles.completeButtonText}>Mark as complete</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={styles.expandHit} onPress={() => !isCompleting && toggleExpanded(task.id)} activeOpacity={0.8}>
             <Ionicons
               name={isExpanded ? 'chevron-up' : 'chevron-down'}
               size={20}
@@ -457,7 +488,7 @@ export default function TaskList({
           </TouchableOpacity>
         </View>
 
-        {isExpanded && (
+        {isExpanded && !isCompleting && (
           <View style={styles.subtasksContainer}>
             <DraggableFlatList<Subtask>
               data={task.subtasks}
@@ -647,9 +678,25 @@ export default function TaskList({
             )}
           </View>
         )}
+      </>
+    );
+    return isCompleting ? (
+      <Animated.View
+        style={[
+          styles.taskCard,
+          styles.taskCardCompleting,
+          isActive && styles.taskCardActive,
+          { opacity: completingOpacityRef },
+        ]}
+      >
+        {cardContent}
+      </Animated.View>
+    ) : (
+      <View style={[styles.taskCard, isCompleted && styles.taskCardCompleted, isActive && styles.taskCardActive]}>
+        {cardContent}
       </View>
     );
-  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, subtaskSuggestionsRefreshingTaskId, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion, refreshSubtaskSuggestions]);
+  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, subtaskSuggestionsRefreshingTaskId, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion, refreshSubtaskSuggestions, completingTaskId, onConfirmCompleteTask]);
 
   if (tasks.length === 0 && finishedTasks.length === 0) {
     return (
@@ -857,8 +904,13 @@ export default function TaskList({
                 style={styles.completeModalButtonConfirm}
                 onPress={() => {
                   if (taskToComplete) {
-                    onCompleteTask(taskToComplete.id);
                     setTaskToComplete(null);
+                    setCompletingTaskId(taskToComplete.id);
+                    if (onConfirmCompleteTask) {
+                      onConfirmCompleteTask(taskToComplete);
+                    } else {
+                      onCompleteTask(taskToComplete.id);
+                    }
                   }
                 }}
                 activeOpacity={0.85}
@@ -1135,6 +1187,7 @@ const styles = StyleSheet.create({
   },
   taskCardCompleted: { borderColor: '#86efac', backgroundColor: '#f0fdf4' },
   taskCardActive: { opacity: 0.95 },
+  taskCardCompleting: { borderColor: '#86efac', backgroundColor: '#ecfdf5' },
 
   taskHeader: { flexDirection: 'row', alignItems: 'flex-start', paddingLeft: 4, paddingRight: 16, paddingVertical: 16, gap: 8 },
 
@@ -1224,6 +1277,8 @@ const styles = StyleSheet.create({
 
   taskHeaderContent: { flex: 1, gap: 6 },
   taskTitle: { fontSize: 16, fontWeight: '600', color: '#1f2937' },
+  taskTitleCompleting: { textDecorationLine: 'line-through', color: '#6b7280' },
+  taskMovingLabel: { fontSize: 13, color: '#10b981', fontWeight: '600', marginTop: 4 },
   taskTitleInput: { fontSize: 16, fontWeight: '600', color: '#1f2937', paddingVertical: 2, paddingHorizontal: 0, flex: 1, borderBottomWidth: 1, borderBottomColor: '#9333ea' },
   taskTitleTouchable: { alignSelf: 'stretch' },
   taskMeta: { fontSize: 12, color: '#6b7280' },
