@@ -21,14 +21,21 @@ export function isSplitTaskAvailable(): boolean {
 
 /**
  * Generate 2-5 subtask labels as micro steps to help someone with ADHD get started and avoid getting stuck.
+ * @param taskTitle - The main task title
+ * @param exclude - Optional list of suggestion texts to avoid; the model will be asked to suggest different ones
  */
-export async function generateSubtasks(taskTitle: string): Promise<string[]> {
+export async function generateSubtasks(taskTitle: string, exclude?: string[]): Promise<string[]> {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error(
       'Anthropic API key is not configured. Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file to use Split task.'
     );
   }
+
+  const excludeInstruction =
+    exclude && exclude.length > 0
+      ? ` Do NOT suggest any of these (the user already saw them): ${JSON.stringify(exclude)}. Suggest completely different alternatives instead.`
+      : '';
 
   let response: Response;
   try {
@@ -43,7 +50,8 @@ export async function generateSubtasks(taskTitle: string): Promise<string[]> {
         model: 'claude-opus-4-6',
         max_tokens: 500,
         system:
-          'You break down tasks into 2-5 micro steps for someone with ADHD. Each step should be tiny and concrete so they can get started without overwhelm and not get stuck. The first step should be the smallest possible (e.g. "Open the doc" or "Get out one ingredient") to lower the barrier to start. Avoid vague or big steps. Reply with only a JSON array of strings, one per micro step. No numbering, no explanation. Example: ["Open the file", "Write one sentence", "Save"].',
+          'You break down tasks into 2-5 micro steps for someone with ADHD. Each step should be tiny and concrete so they can get started without overwhelm and not get stuck. The first step should be the smallest possible (e.g. "Open the doc" or "Get out one ingredient") to lower the barrier to start. Avoid vague or big steps. Reply with only a JSON array of strings, one per micro step. No numbering, no explanation. Example: ["Open the file", "Write one sentence", "Save"].' +
+          excludeInstruction,
         messages: [
           {
             role: 'user',

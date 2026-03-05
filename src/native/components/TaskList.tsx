@@ -52,10 +52,12 @@ export default function TaskList({
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
+  const refillInProgressRef = useRef(false);
 
   const [addSubtaskFocusedTaskId, setAddSubtaskFocusedTaskId] = useState<string | null>(null);
   const [subtaskSuggestions, setSubtaskSuggestions] = useState<Record<string, string[]>>({});
   const [subtaskSuggestionsLoading, setSubtaskSuggestionsLoading] = useState<string | null>(null);
+  const [subtaskSuggestionsRefreshingTaskId, setSubtaskSuggestionsRefreshingTaskId] = useState<string | null>(null);
   const [showChooseTaskForSubtaskHelper, setShowChooseTaskForSubtaskHelper] = useState(false);
 
   const [orderedIds, setOrderedIds] = useState<string[]>(() => tasks.map(t => t.id));
@@ -155,6 +157,65 @@ export default function TaskList({
       [taskId]: (prev[taskId] || []).filter(s => s !== text),
     }));
   }, []);
+
+  const refillSubtaskSuggestions = useCallback(async (task: Task) => {
+    if (!isSplitTaskAvailable() || refillInProgressRef.current) return;
+    const pool = subtaskSuggestions[task.id] || [];
+    if (pool.length >= 3) return;
+    refillInProgressRef.current = true;
+    try {
+      const labels = await generateSubtasks(task.title);
+      const existingSet = new Set([
+        ...task.subtasks.map(s => s.text.trim().toLowerCase()),
+        ...pool.map(s => s.trim().toLowerCase()),
+      ]);
+      const newOnes = labels
+        .filter(t => t.trim() && !existingSet.has(t.trim().toLowerCase()))
+        .slice(0, 3 - pool.length);
+      if (newOnes.length > 0) {
+        setSubtaskSuggestions(prev => ({
+          ...prev,
+          [task.id]: [...(prev[task.id] || []), ...newOnes],
+        }));
+      }
+    } catch (_) {
+      // keep current pool on error
+    } finally {
+      refillInProgressRef.current = false;
+    }
+  }, [subtaskSuggestions]);
+
+  const refreshSubtaskSuggestions = useCallback(async (task: Task) => {
+    if (!isSplitTaskAvailable() || subtaskSuggestionsRefreshingTaskId || subtaskSuggestionsLoading === task.id) return;
+    const existingSet = new Set(task.subtasks.map(s => s.text.trim().toLowerCase()));
+    const currentPool = (subtaskSuggestions[task.id] || []).filter(s => !existingSet.has(s.trim().toLowerCase()));
+    const lastShown = currentPool.slice(0, 3);
+    setSubtaskSuggestionsRefreshingTaskId(task.id);
+    try {
+      const labels = await generateSubtasks(task.title, lastShown);
+      const existingTexts = new Set(task.subtasks.map(s => s.text.trim().toLowerCase()));
+      const excludeSet = new Set(lastShown.map(s => s.trim().toLowerCase()));
+      const filtered = labels
+        .filter(t => t.trim() && !existingTexts.has(t.trim().toLowerCase()) && !excludeSet.has(t.trim().toLowerCase()))
+        .slice(0, 5);
+      setSubtaskSuggestions(prev => ({ ...prev, [task.id]: filtered }));
+    } catch (_) {
+      // keep current on error
+    } finally {
+      setSubtaskSuggestionsRefreshingTaskId(null);
+    }
+  }, [subtaskSuggestionsRefreshingTaskId, subtaskSuggestionsLoading, subtaskSuggestions]);
+
+  useEffect(() => {
+    if (!addSubtaskFocusedTaskId || refillInProgressRef.current) return;
+    const task = tasks.find(t => t.id === addSubtaskFocusedTaskId);
+    if (!task) return;
+    const pool = (subtaskSuggestions[task.id] || []).filter(
+      s => !task.subtasks.some(st => st.text.trim().toLowerCase() === s.trim().toLowerCase())
+    );
+    if (pool.length >= 3) return;
+    refillSubtaskSuggestions(task);
+  }, [addSubtaskFocusedTaskId, subtaskSuggestions, tasks, refillSubtaskSuggestions]);
 
   const handleCompletePress = (task: Task) => {
     setTaskToComplete(task);
@@ -523,14 +584,29 @@ export default function TaskList({
               <View style={styles.suggestionsPopup}>
                 <View style={styles.suggestionsPopupHeader}>
                   <Text style={styles.suggestionsTitle}>Suggestions</Text>
-                  <TouchableOpacity
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    onPress={() => setAddSubtaskFocusedTaskId(null)}
-                    style={styles.suggestionsCloseButton}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="close" size={22} color="#6b7280" />
-                  </TouchableOpacity>
+                  <View style={styles.suggestionsHeaderActions}>
+                    <TouchableOpacity
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      onPress={() => refreshSubtaskSuggestions(task)}
+                      disabled={subtaskSuggestionsLoading === task.id || subtaskSuggestionsRefreshingTaskId === task.id}
+                      style={styles.suggestionsRefreshButton}
+                      activeOpacity={0.85}
+                    >
+                      {subtaskSuggestionsRefreshingTaskId === task.id ? (
+                        <ActivityIndicator size="small" color="#9333ea" />
+                      ) : (
+                        <Ionicons name="refresh" size={20} color="#9333ea" />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      onPress={() => setAddSubtaskFocusedTaskId(null)}
+                      style={styles.suggestionsCloseButton}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="close" size={22} color="#6b7280" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 {subtaskSuggestionsLoading === task.id ? (
                   <View style={styles.suggestionsLoadingRow}>
@@ -573,7 +649,7 @@ export default function TaskList({
         )}
       </View>
     );
-  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion]);
+  }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, subtaskSuggestionsRefreshingTaskId, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion, refreshSubtaskSuggestions]);
 
   if (tasks.length === 0 && finishedTasks.length === 0) {
     return (
@@ -1320,6 +1396,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
+  suggestionsHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  suggestionsRefreshButton: { padding: 4, minWidth: 32, alignItems: 'center', justifyContent: 'center' },
   suggestionsCloseButton: { padding: 4 },
   suggestionsTitle: {
     fontSize: 12,
