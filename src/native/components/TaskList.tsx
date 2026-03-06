@@ -747,7 +747,7 @@ export default function TaskList({
           onPress={() => setActiveSubTab('current')}
           activeOpacity={0.8}
         >
-          <Text style={[styles.subtabEmoji, activeSubTab === 'current' && styles.subtabEmojiActive]}>✅</Text>
+          <Text style={[styles.subtabEmoji, activeSubTab === 'current' && styles.subtabEmojiActive]}>📝</Text>
           <Text style={[styles.subtabText, activeSubTab === 'current' && styles.subtabTextActive]}>
             Current
           </Text>

@@ -661,7 +661,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                 activeOpacity={0.85}
               >
                 <Ionicons name="add-circle" size={22} color="#fff" />
-                <Text style={styles.reviewConfirmBtnText}>Add Tasks to List</Text>
+                <Text style={styles.reviewConfirmBtnText}>Add to tasks list</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -857,13 +857,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   reviewModalCard: {
-    width: '90%',
-    height: '95%',
-    maxHeight: 600,
+    width: '96%',
+    height: '96%',
+    maxHeight: 700,
     backgroundColor: 'white',
     borderRadius: 16,
     overflow: 'hidden',
-    margin: 20,
+    margin: 12,
     borderWidth: 1,
     borderColor: '#e9d5ff',
   },
@@ -872,6 +872,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f3ff',
   },
   reviewModalHeader: {
+    paddingTop: 24,
     paddingHorizontal: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
@@ -888,13 +889,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#6b21a8',
     lineHeight: 22,
-    paddingRight: 40,
+    paddingRight: 20,
   },
   reviewModalClose: {
     position: 'absolute',
     top: 0,
     right: 16,
-    padding: 4,
+    padding: 6,
+    paddingTop: 12
   },
   reviewModalScroll: { flex: 1 },
   reviewModalScrollContent: {
@@ -979,24 +981,25 @@ const styles = StyleSheet.create({
   reviewRowCloseBtn: { padding: 4 },
   reviewModalFooter: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    paddingBottom: 20,
     borderTopWidth: 1,
     borderTopColor: '#e9d5ff',
     backgroundColor: 'white',
   },
   reviewConfirmBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 16,
-    minHeight: 52,
-    borderRadius: 12,
+    alignSelf: 'stretch',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    minHeight: 44,
+    borderRadius: 500,
     backgroundColor: '#9333ea',
   },
-  reviewConfirmBtnText: { fontSize: 17, fontWeight: '700', color: '#ffffff' },
+  reviewConfirmBtnText: { fontSize: 17, fontWeight: '600', color: '#ffffff' },
 
   liveTranscript: {
     marginTop: 16,
