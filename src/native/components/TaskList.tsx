@@ -738,18 +738,6 @@ export default function TaskList({
     );
   }, [expandedTasks, newSubtaskText, onAddSubtask, onCompleteTask, onToggleSubtask, onUpdateTask, splittingTaskId, editingSubtask, draftSubtaskText, editingTaskTitleId, draftTaskTitle, submitTaskTitleEdit, submitEditSubtask, startEditSubtask, tasks, orderedIds, tasksById, onReorderTasks, addSubtaskFocusedTaskId, subtaskSuggestions, subtaskSuggestionsLoading, subtaskSuggestionsRefreshingTaskId, fetchSubtaskSuggestions, addSuggestionSubtask, removeSuggestion, refreshSubtaskSuggestions, completingTaskId, onConfirmCompleteTask]);
 
-  if (tasks.length === 0 && finishedTasks.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <View style={styles.emptyCard}>
-          <Ionicons name="list-outline" size={48} color="#9333ea" />
-          <Text style={styles.emptyTitle}>No Tasks</Text>
-          <Text style={styles.emptyText}>Visit the Braindump to add your first tasks.</Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       {/* Subtab: Current | Completed */}
@@ -789,17 +777,27 @@ export default function TaskList({
       </View>
 
       {activeSubTab === 'current' ? (
-        <DraggableFlatList
-          data={orderedTasks}
-          keyExtractor={(item) => item.id}
-          renderItem={renderItem}
-          onDragEnd={({ data }) => {
-            setOrderedIds(data.map(t => t.id));
-            onReorderTasks?.(data);
-          }}
-          contentContainerStyle={styles.listContent}
-          activationDistance={12}
-        />
+        orderedTasks.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyCard}>
+              <Ionicons name="list-outline" size={48} color="#d1d5db" />
+              <Text style={styles.emptyTitle}>Empty list</Text>
+              <Text style={styles.emptyText}>Add some tasks through a braindump.</Text>
+            </View>
+          </View>
+        ) : (
+          <DraggableFlatList
+            data={orderedTasks}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            onDragEnd={({ data }) => {
+              setOrderedIds(data.map(t => t.id));
+              onReorderTasks?.(data);
+            }}
+            contentContainerStyle={styles.listContent}
+            activationDistance={12}
+          />
+        )
       ) : (
         <ScrollView style={styles.graveyardScroll} contentContainerStyle={styles.graveyardScrollContent}>
           {finishedTasks.length === 0 ? (
@@ -1213,11 +1211,16 @@ const styles = StyleSheet.create({
   subtabUpdatedIcon: { marginLeft: 4 },
 
   graveyardScroll: { flex: 1 },
-  graveyardScrollContent: { padding: 16, paddingBottom: 32 },
+  graveyardScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    paddingBottom: 32,
+  },
   graveyardEmpty: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
     gap: 12,
   },
   graveyardEmptyEmoji: { fontSize: 48 },

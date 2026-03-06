@@ -633,13 +633,12 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
               ))}
             </ScrollView>
             <View style={styles.reviewManualAddSection}>
-              <Text style={styles.reviewManualAddLabel}>Add a task manually</Text>
               <View style={styles.reviewManualAddRow}>
                 <TextInput
                   style={styles.reviewManualAddInput}
                   value={manualTaskTitle}
                   onChangeText={setManualTaskTitle}
-                  placeholder="Enter task..."
+                  placeholder="Add a task manually"
                   placeholderTextColor="#9ca3af"
                   onSubmitEditing={addManualTask}
                   returnKeyType="done"
@@ -662,7 +661,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                 activeOpacity={0.85}
               >
                 <Ionicons name="add-circle" size={22} color="#fff" />
-                <Text style={styles.reviewConfirmBtnText}>Add selected to task list</Text>
+                <Text style={styles.reviewConfirmBtnText}>Add Tasks to List</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -859,9 +858,9 @@ const styles = StyleSheet.create({
   },
   reviewModalCard: {
     width: '90%',
-    height: '85%',
+    height: '95%',
     maxHeight: 600,
-    backgroundColor: '#f5f3ff',
+    backgroundColor: 'white',
     borderRadius: 16,
     overflow: 'hidden',
     margin: 20,
@@ -877,7 +876,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e9d5ff',
-    backgroundColor: '#ede9fe',
+    backgroundColor: 'white',
   },
   reviewModalTitle: {
     fontSize: 24,
@@ -984,7 +983,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     borderTopWidth: 1,
     borderTopColor: '#e9d5ff',
-    backgroundColor: '#ede9fe',
+    backgroundColor: 'white',
   },
   reviewConfirmBtn: {
     flex: 1,
