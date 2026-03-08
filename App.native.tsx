@@ -516,7 +516,7 @@ export default function App() {
       <ErrorBoundary>
         <GestureHandlerRootView style={styles.container}>
           <NavigationContainer>
-            <SafeAreaView style={styles.container} edges={["top"]}>
+            <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
               <StatusBar barStyle="dark-content" />
               <Header gameState={gameState} />
               <ConfettiOverlay visible={showConfetti} />

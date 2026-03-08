@@ -46,6 +46,7 @@ import {
   isTranscriptionAvailable,
 } from "../services/transcription";
 import { getRecommendedTask } from "../services/prioritize";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CuteAvatar from "./CuteAvatar";
 
 type TasksSubTab = "current" | "completed";
@@ -75,6 +76,7 @@ export default function TaskList({
   completedTabJustUpdated,
   gameState,
 }: TaskListProps) {
+  const insets = useSafeAreaInsets();
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [newSubtaskText, setNewSubtaskText] = useState<Record<string, string>>(
     {},
@@ -101,7 +103,20 @@ export default function TaskList({
   const [voiceTranscribing, setVoiceTranscribing] = useState(false);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [pendingVoiceEdits, setPendingVoiceEdits] = useState<{
+    task: Task;
+    before: string[];
+    after: string[];
+  } | null>(null);
+  const [voiceLiveTranscript, setVoiceLiveTranscript] = useState("");
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
+  const voiceReRecordingRef = useRef(false);
+  const voiceTranscriptionQueueRef = useRef<string[]>([]);
+  const voiceRecordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const voiceChunkTranscribingRef = useRef(false);
+  const voiceLiveTranscriptRef = useRef("");
   const refillInProgressRef = useRef(false);
 
   const [addSubtaskFocusedTaskId, setAddSubtaskFocusedTaskId] = useState<
@@ -124,6 +139,12 @@ export default function TaskList({
 
   const [orderedIds, setOrderedIds] = useState<string[]>(() =>
     tasks.map((t) => t.id),
+  );
+  const [activeSort, setActiveSort] = useState<
+    "priority" | "recentlyAdded" | null
+  >(null);
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(
+    null,
   );
   const prevTaskCountRef = useRef(tasks.length);
 
@@ -523,10 +544,39 @@ export default function TaskList({
     setShowChooseTaskForSubtaskHelper(true);
   };
 
+  const processVoiceTranscriptionQueue = useCallback(async () => {
+    if (
+      voiceChunkTranscribingRef.current ||
+      voiceTranscriptionQueueRef.current.length === 0
+    )
+      return;
+    voiceChunkTranscribingRef.current = true;
+    while (voiceTranscriptionQueueRef.current.length > 0) {
+      const uri = voiceTranscriptionQueueRef.current.shift();
+      if (!uri) continue;
+      try {
+        const text = await transcribeAudio(uri);
+        if (text.trim()) {
+          const next = voiceLiveTranscriptRef.current
+            ? `${voiceLiveTranscriptRef.current} ${text}`.trim()
+            : text.trim();
+          voiceLiveTranscriptRef.current = next;
+          setVoiceLiveTranscript(next);
+        }
+      } catch (err) {
+        console.error("Voice chunk transcription error:", err);
+      }
+    }
+    voiceChunkTranscribingRef.current = false;
+  }, []);
+
   const startVoiceRecording = async () => {
     const task = voiceTask;
     if (!task) return;
     setVoiceError(null);
+    setVoiceLiveTranscript("");
+    voiceLiveTranscriptRef.current = "";
+    voiceTranscriptionQueueRef.current = [];
     try {
       const granted = await requestMicrophonePermission();
       if (!granted) {
@@ -536,6 +586,24 @@ export default function TaskList({
       const recording = await startRecording();
       voiceRecordingRef.current = recording;
       setVoiceRecording(true);
+      voiceRecordingIntervalRef.current = setInterval(async () => {
+        if (
+          voiceRecordingRef.current &&
+          !voiceChunkTranscribingRef.current
+        ) {
+          try {
+            const uri = await stopRecording(voiceRecordingRef.current);
+            voiceTranscriptionQueueRef.current.push(uri);
+            const newRecording = await startRecording();
+            voiceRecordingRef.current = newRecording;
+            if (!voiceChunkTranscribingRef.current) {
+              processVoiceTranscriptionQueue();
+            }
+          } catch (err) {
+            console.error("Error in voice recording interval:", err);
+          }
+        }
+      }, 4000);
     } catch (err) {
       setVoiceError(
         err instanceof Error ? err.message : "Failed to start recording.",
@@ -682,34 +750,47 @@ export default function TaskList({
     }
     const task = voiceTask;
     setVoiceRecording(false);
+    if (voiceRecordingIntervalRef.current) {
+      clearInterval(voiceRecordingIntervalRef.current);
+      voiceRecordingIntervalRef.current = null;
+    }
     try {
-      const uri = await stopRecording(voiceRecordingRef.current);
+      const finalUri = await stopRecording(voiceRecordingRef.current);
       voiceRecordingRef.current = null;
-      if (!uri || !task) return;
-      setVoiceTranscribing(true);
+      if (!task) return;
       setVoiceError(null);
-      const transcript = await transcribeAudio(uri);
-      setVoiceTranscribing(false);
-      if (!transcript.trim()) {
+      await processVoiceTranscriptionQueue();
+      if (finalUri) {
+        setVoiceTranscribing(true);
+        try {
+          const finalText = await transcribeAudio(finalUri);
+          if (finalText.trim()) {
+            const next = voiceLiveTranscriptRef.current
+              ? `${voiceLiveTranscriptRef.current} ${finalText}`.trim()
+              : finalText.trim();
+            voiceLiveTranscriptRef.current = next;
+            setVoiceLiveTranscript(next);
+          }
+        } finally {
+          setVoiceTranscribing(false);
+        }
+      }
+      const combinedTranscript = voiceLiveTranscriptRef.current.trim();
+      if (!combinedTranscript.trim()) {
         setVoiceError("No speech detected. Try again.");
         return;
       }
-      setVoiceProcessing(true);
+      setVoiceTranscribing(true);
       const currentTexts = task.subtasks.map((s) => s.text);
       const newTexts = await transcriptToSubtaskEdits(
         task.title,
         currentTexts,
-        transcript,
+        combinedTranscript,
       );
-      const newSubtasks: Subtask[] = newTexts.map((text, i) => ({
-        id: `${task.id}-sub-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
-        text,
-        completed: false,
-      }));
-      onUpdateTask(task.id, { subtasks: newSubtasks });
-      setVoiceTask(null);
+      setVoiceTranscribing(false);
       setVoiceProcessing(false);
-      if (!expandedTasks.has(task.id)) toggleExpanded(task.id);
+      voiceReRecordingRef.current = true;
+      setPendingVoiceEdits({ task, before: currentTexts, after: newTexts });
     } catch (err) {
       setVoiceTranscribing(false);
       setVoiceProcessing(false);
@@ -726,6 +807,19 @@ export default function TaskList({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (voiceTask === null) {
+      if (voiceRecordingIntervalRef.current) {
+        clearInterval(voiceRecordingIntervalRef.current);
+        voiceRecordingIntervalRef.current = null;
+      }
+      voiceTranscriptionQueueRef.current = [];
+      voiceChunkTranscribingRef.current = false;
+      voiceLiveTranscriptRef.current = "";
+      setVoiceLiveTranscript("");
+    }
+  }, [voiceTask]);
 
   const totalSubtasks = tasks.reduce(
     (acc, task) => acc + task.subtasks.length,
@@ -1237,6 +1331,7 @@ export default function TaskList({
             styles.taskCard,
             isCompleted && styles.taskCardCompleted,
             isActive && styles.taskCardActive,
+            highlightedTaskId === task.id && styles.taskCardHighlight,
             !isExpanded &&
               !isCompleted &&
               getPriorityTabStyle(displayPriority, false).backgroundColor
@@ -1283,6 +1378,7 @@ export default function TaskList({
       refreshSubtaskSuggestions,
       completingTaskId,
       onConfirmCompleteTask,
+      highlightedTaskId,
     ],
   );
 
@@ -1392,6 +1488,21 @@ export default function TaskList({
                 <TouchableOpacity
                   style={styles.startHereBanner}
                   onPress={() => {
+                    const priorityOrder = { high: 0, medium: 1, low: 2 };
+                    const sorted = [...orderedTasks].sort((a, b) => {
+                      const pa = getDerivedPriority(a.dueDate);
+                      const pb = getDerivedPriority(b.dueDate);
+                      if (priorityOrder[pa] !== priorityOrder[pb])
+                        return priorityOrder[pa] - priorityOrder[pb];
+                      if (!a.dueDate && !b.dueDate) return 0;
+                      if (!a.dueDate) return 1;
+                      if (!b.dueDate) return -1;
+                      return a.dueDate.localeCompare(b.dueDate);
+                    });
+                    setOrderedIds(sorted.map((t) => t.id));
+                    onReorderTasks?.(sorted);
+                    setActiveSort("priority");
+                    setHighlightedTaskId(recommended.task.id);
                     if (!expandedTasks.has(recommended.task.id))
                       toggleExpanded(recommended.task.id);
                   }}
@@ -1416,8 +1527,14 @@ export default function TaskList({
             })()}
             <View style={styles.sortRow}>
               <TouchableOpacity
-                style={styles.sortFilterButton}
+                style={[
+                  styles.sortFilterButton,
+                  activeSort === "priority"
+                    ? styles.sortFilterButtonSelected
+                    : styles.sortFilterButtonUnselected,
+                ]}
                 onPress={() => {
+                  setHighlightedTaskId(null);
                   const priorityOrder = { high: 0, medium: 1, low: 2 };
                   const sorted = [...orderedTasks].sort((a, b) => {
                     const pa = getDerivedPriority(a.dueDate);
@@ -1431,15 +1548,34 @@ export default function TaskList({
                   });
                   setOrderedIds(sorted.map((t) => t.id));
                   onReorderTasks?.(sorted);
+                  setActiveSort("priority");
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="flag" size={16} color="#9333ea" />
-                <Text style={styles.sortFilterButtonText}>Sort by priority</Text>
+                <Ionicons
+                  name="flag"
+                  size={16}
+                  color={activeSort === "priority" ? "#9333ea" : "#6b7280"}
+                />
+                <Text
+                  style={
+                    activeSort === "priority"
+                      ? styles.sortFilterButtonTextSelected
+                      : styles.sortFilterButtonTextUnselected
+                  }
+                >
+                  Sort by priority
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.sortFilterButton}
+                style={[
+                  styles.sortFilterButton,
+                  activeSort === "recentlyAdded"
+                    ? styles.sortFilterButtonSelected
+                    : styles.sortFilterButtonUnselected,
+                ]}
                 onPress={() => {
+                  setHighlightedTaskId(null);
                   const sorted = [...orderedTasks].sort((a, b) => {
                     const aT =
                       a.createdAt instanceof Date
@@ -1453,11 +1589,22 @@ export default function TaskList({
                   });
                   setOrderedIds(sorted.map((t) => t.id));
                   onReorderTasks?.(sorted);
+                  setActiveSort("recentlyAdded");
                 }}
                 activeOpacity={0.85}
               >
-                <Ionicons name="time" size={16} color="#9333ea" />
-                <Text style={styles.sortFilterButtonText}>
+                <Ionicons
+                  name="time"
+                  size={16}
+                  color={activeSort === "recentlyAdded" ? "#9333ea" : "#6b7280"}
+                />
+                <Text
+                  style={
+                    activeSort === "recentlyAdded"
+                      ? styles.sortFilterButtonTextSelected
+                      : styles.sortFilterButtonTextUnselected
+                  }
+                >
                   Sort by recently added
                 </Text>
               </TouchableOpacity>
@@ -1469,8 +1616,13 @@ export default function TaskList({
               onDragEnd={({ data }) => {
                 setOrderedIds(data.map((t) => t.id));
                 onReorderTasks?.(data);
+                setActiveSort(null);
+                setHighlightedTaskId(null);
               }}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: 200 + insets.bottom },
+              ]}
               activationDistance={12}
             />
           </>
@@ -1481,6 +1633,7 @@ export default function TaskList({
             contentContainerStyle={[
               styles.graveyardScrollContent,
               finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
+              { paddingBottom: 140 + insets.bottom },
             ]}
           >
             {finishedTasks.length > 0 && (
@@ -1488,7 +1641,7 @@ export default function TaskList({
                 <CuteAvatar mood="excited" size="sm" />
                 <View style={styles.completedBannerBubble}>
                   <Text style={styles.completedBannerText}>
-                    wow! great job completing{" "}
+                    Wow! Great job completing{" "}
                     {finishedTasks.length === 1
                       ? "1 task"
                       : `${finishedTasks.length} tasks`}{" "}
@@ -1547,6 +1700,14 @@ export default function TaskList({
             onPress={(e) => e.stopPropagation()}
             style={styles.chooseTaskModalCard}
           >
+            <TouchableOpacity
+              style={styles.modalCloseX}
+              onPress={() => setShowChooseTaskForSubtaskHelper(false)}
+              hitSlop={12}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
             <Text style={styles.subtaskHelperModalTitle}>Choose a task</Text>
             <Text style={styles.subtaskHelperModalMessage}>
               Tap a task to edit its subtasks with voice.
@@ -1578,13 +1739,6 @@ export default function TaskList({
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <TouchableOpacity
-              style={styles.subtaskHelperCancel}
-              onPress={() => setShowChooseTaskForSubtaskHelper(false)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
-            </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1594,92 +1748,224 @@ export default function TaskList({
         transparent
         animationType="fade"
         onRequestClose={() => {
-          if (!voiceRecording && !voiceTranscribing && !voiceProcessing)
+          if (pendingVoiceEdits) {
+            setPendingVoiceEdits(null);
+            voiceReRecordingRef.current = false;
             setVoiceTask(null);
+          } else if (!voiceRecording && !voiceTranscribing && !voiceProcessing) {
+            voiceReRecordingRef.current = false;
+            setVoiceTask(null);
+          }
         }}
       >
         <TouchableOpacity
           style={styles.completeModalOverlay}
           activeOpacity={1}
           onPress={() => {
-            if (!voiceRecording && !voiceTranscribing && !voiceProcessing)
+            if (pendingVoiceEdits) {
+              setPendingVoiceEdits(null);
+              voiceReRecordingRef.current = false;
               setVoiceTask(null);
+            } else if (!voiceRecording && !voiceTranscribing && !voiceProcessing) {
+              voiceReRecordingRef.current = false;
+              setVoiceTask(null);
+            }
           }}
         >
           <TouchableOpacity
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
-            style={styles.voiceModalCard}
+            style={
+              pendingVoiceEdits
+                ? styles.voiceConfirmModalCard
+                : styles.voiceModalCard
+            }
           >
-            <View style={styles.voiceModalAvatarCard}>
-              <CuteAvatar
-                mood={
-                  voiceProcessing
-                    ? "excited"
-                    : voiceTranscribing
-                      ? "proud"
-                      : voiceRecording
-                        ? "happy"
-                        : "neutral"
-                }
-                size="md"
-              />
-              <View style={styles.voiceModalMessageBox}>
-                <Text style={styles.voiceModalMessageText}>
-                  {voiceProcessing
-                    ? "Updating subtasks..."
-                    : voiceTranscribing
-                      ? "Transcribing..."
-                      : voiceRecording
-                        ? "I'm listening... tell me how to edit subtasks. 💜"
-                        : `Tell me how to edit or add subtasks for "${voiceTask?.title}". Tap the mic when you're ready.`}
-                </Text>
-              </View>
-            </View>
-
-            {voiceError ? (
-              <View style={styles.voiceModalErrorWrap}>
-                <Ionicons name="alert-circle" size={18} color="#dc2626" />
-                <Text style={styles.voiceErrorText}>{voiceError}</Text>
-              </View>
-            ) : null}
-
-            <View
-              style={[
-                styles.voiceModalVoiceCard,
-                voiceRecording && styles.voiceModalVoiceCardRecording,
-              ]}
-            >
-              <TouchableOpacity
-                style={[
-                  styles.voiceModalRecordButton,
-                  voiceRecording && styles.voiceModalRecordButtonActive,
-                ]}
-                onPress={
-                  voiceRecording ? stopVoiceRecording : startVoiceRecording
-                }
-                disabled={voiceTranscribing || voiceProcessing}
-                activeOpacity={0.9}
-              >
-                <Ionicons
-                  name={voiceRecording ? "mic-off" : "mic"}
-                  size={48}
-                  color="#fff"
-                />
-              </TouchableOpacity>
-              <Text style={styles.voiceModalRecordLabel}>
-                {voiceRecording ? "Tap to stop" : "Tap to record"}
-              </Text>
-            </View>
-
             <TouchableOpacity
-              style={styles.voiceModalCancel}
-              onPress={() => setVoiceTask(null)}
-              disabled={voiceRecording || voiceTranscribing || voiceProcessing}
+              style={styles.modalCloseX}
+              onPress={() => {
+                setPendingVoiceEdits(null);
+                voiceReRecordingRef.current = false;
+                setVoiceTask(null);
+              }}
+              disabled={
+                !pendingVoiceEdits &&
+                (voiceRecording || voiceTranscribing || voiceProcessing)
+              }
+              hitSlop={12}
               activeOpacity={0.85}
             >
-              <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
+              <Ionicons name="close" size={24} color="#6b7280" />
             </TouchableOpacity>
+
+            {pendingVoiceEdits ? (
+              <>
+                <Text style={styles.voiceConfirmModalTitle}>
+                  Review subtask changes
+                </Text>
+                <Text
+                  style={styles.voiceConfirmModalTaskName}
+                  numberOfLines={1}
+                >
+                  {pendingVoiceEdits.task.title}
+                </Text>
+                <ScrollView
+                  style={styles.voiceConfirmScroll}
+                  contentContainerStyle={styles.voiceConfirmScrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.voiceConfirmSection}>
+                    <Text style={styles.voiceConfirmSectionLabel}>
+                      Before
+                    </Text>
+                    <View style={styles.voiceConfirmList}>
+                      {pendingVoiceEdits.before.length
+                        ? pendingVoiceEdits.before.map((t, i) => (
+                            <Text
+                              key={i}
+                              style={styles.voiceConfirmListItem}
+                              numberOfLines={2}
+                            >
+                              {i + 1}. {t}
+                            </Text>
+                          ))
+                        : (
+                            <Text style={styles.voiceConfirmListEmpty}>
+                              No subtasks
+                            </Text>
+                          )}
+                    </View>
+                  </View>
+                  <View style={styles.voiceConfirmSection}>
+                    <Text style={styles.voiceConfirmSectionLabel}>After</Text>
+                    <View style={styles.voiceConfirmList}>
+                      {pendingVoiceEdits.after.map((t, i) => (
+                        <Text
+                          key={i}
+                          style={styles.voiceConfirmListItem}
+                          numberOfLines={2}
+                        >
+                          {i + 1}. {t}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                </ScrollView>
+                <View style={styles.voiceConfirmActions}>
+                  <TouchableOpacity
+                    style={styles.voiceConfirmRerecordButton}
+                    onPress={() => setPendingVoiceEdits(null)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.voiceConfirmRerecordText}>
+                      Re-record
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.voiceConfirmApplyButton}
+                    onPress={() => {
+                      const { task, after } = pendingVoiceEdits;
+                      const newSubtasks: Subtask[] = after.map((text, i) => ({
+                        id: `${task.id}-sub-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+                        text,
+                        completed: false,
+                      }));
+                      onUpdateTask(task.id, { subtasks: newSubtasks });
+                      setPendingVoiceEdits(null);
+                      voiceReRecordingRef.current = false;
+                      setVoiceTask(null);
+                      if (!expandedTasks.has(task.id)) toggleExpanded(task.id);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.voiceConfirmApplyText}>
+                      Apply changes
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.voiceModalAvatarCard}>
+                  <CuteAvatar
+                    mood={
+                      voiceProcessing
+                        ? "excited"
+                        : voiceTranscribing
+                          ? "proud"
+                          : voiceRecording
+                            ? "happy"
+                            : "neutral"
+                    }
+                    size="md"
+                  />
+                  <View style={styles.voiceModalMessageBox}>
+                    <Text style={styles.voiceModalMessageText}>
+                      {voiceProcessing
+                        ? "Updating subtasks..."
+                        : voiceTranscribing
+                          ? "Transcribing..."
+                          : voiceRecording
+                            ? "I'm listening... tell me how to edit subtasks. 💜"
+                            : voiceReRecordingRef.current
+                              ? `Tap the mic to record your changes again for "${voiceTask?.title}".`
+                              : `Tell me how to edit or add subtasks for "${voiceTask?.title}". Tap the mic when you're ready.`}
+                    </Text>
+                  </View>
+                </View>
+
+                {voiceError ? (
+                  <View style={styles.voiceModalErrorWrap}>
+                    <Ionicons
+                      name="alert-circle"
+                      size={18}
+                      color="#dc2626"
+                    />
+                    <Text style={styles.voiceErrorText}>{voiceError}</Text>
+                  </View>
+                ) : null}
+
+                <View
+                  style={[
+                    styles.voiceModalVoiceCard,
+                    voiceRecording && styles.voiceModalVoiceCardRecording,
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.voiceModalRecordButton,
+                      voiceRecording && styles.voiceModalRecordButtonActive,
+                    ]}
+                    onPress={
+                      voiceRecording
+                        ? stopVoiceRecording
+                        : startVoiceRecording
+                    }
+                    disabled={voiceTranscribing || voiceProcessing}
+                    activeOpacity={0.9}
+                  >
+                    <Ionicons
+                      name={voiceRecording ? "mic-off" : "mic"}
+                      size={48}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                  <Text style={styles.voiceModalRecordLabel}>
+                    {voiceRecording
+                      ? "Tap to stop"
+                      : "Tap to record"}
+                  </Text>
+                </View>
+
+                {voiceRecording && voiceLiveTranscript.trim() ? (
+                  <View style={styles.voiceLiveTranscript}>
+                    <Text style={styles.voiceLiveTranscriptText}>
+                      {voiceLiveTranscript}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1700,6 +1986,14 @@ export default function TaskList({
             onPress={(e) => e.stopPropagation()}
             style={styles.completeModalCard}
           >
+            <TouchableOpacity
+              style={styles.modalCloseX}
+              onPress={() => setTaskToComplete(null)}
+              hitSlop={12}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
             <View style={styles.completeModalIconWrap}>
               <Text style={styles.completeModalEmoji}>🎉</Text>
             </View>
@@ -1708,13 +2002,6 @@ export default function TaskList({
               Move "{taskToComplete?.title}" to completed tasks?
             </Text>
             <View style={styles.completeModalActions}>
-              <TouchableOpacity
-                style={styles.completeModalButtonCancel}
-                onPress={() => setTaskToComplete(null)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.completeModalButtonCancelText}>Cancel</Text>
-              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.completeModalButtonConfirm}
                 onPress={() => {
@@ -1755,6 +2042,14 @@ export default function TaskList({
             onPress={(e) => e.stopPropagation()}
             style={styles.dueDateModalCard}
           >
+            <TouchableOpacity
+              style={styles.modalCloseX}
+              onPress={() => setDueDateModalTask(null)}
+              hitSlop={12}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
             <Text style={styles.dueDateModalTitle}>Due date</Text>
             <Text style={styles.dueDateModalTaskName} numberOfLines={1}>
               {dueDateModalTask?.title}
@@ -1855,13 +2150,6 @@ export default function TaskList({
               >
                 <Text style={styles.dueDateClearText}>Clear due date</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.dueDateFooterButton}
-                onPress={() => setDueDateModalTask(null)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.dueDateCancelText}>Cancel</Text>
-              </TouchableOpacity>
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -1886,6 +2174,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 24,
+    paddingTop: 48,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
@@ -2000,6 +2289,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 24,
+    paddingTop: 48,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
@@ -2073,6 +2363,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#374151",
   },
+  voiceLiveTranscript: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: "#f9fafb",
+    borderRadius: 12,
+  },
+  voiceLiveTranscriptText: {
+    fontSize: 14,
+    color: "#374151",
+    fontStyle: "italic",
+  },
   voiceModalCancel: {
     alignSelf: "stretch",
     alignItems: "center",
@@ -2082,6 +2383,90 @@ const styles = StyleSheet.create({
     backgroundColor: "#f3f4f6",
     borderWidth: 1.5,
     borderColor: "#d1d5db",
+  },
+  modalCloseX: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    zIndex: 1,
+    padding: 4,
+  },
+  voiceConfirmModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    maxHeight: "85%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    paddingTop: 48,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  voiceConfirmModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 4,
+  },
+  voiceConfirmModalTaskName: {
+    fontSize: 14,
+    color: "#6b7280",
+    marginBottom: 16,
+  },
+  voiceConfirmScroll: { maxHeight: 220 },
+  voiceConfirmScrollContent: { paddingBottom: 8 },
+  voiceConfirmSection: { marginBottom: 14 },
+  voiceConfirmSectionLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 6,
+    textTransform: "uppercase",
+  },
+  voiceConfirmList: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 10,
+    padding: 12,
+  },
+  voiceConfirmListItem: {
+    fontSize: 13,
+    color: "#374151",
+    marginBottom: 4,
+  },
+  voiceConfirmListEmpty: { fontSize: 13, color: "#9ca3af", fontStyle: "italic" },
+  voiceConfirmActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 20,
+  },
+  voiceConfirmRerecordButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    alignItems: "center",
+  },
+  voiceConfirmRerecordText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  voiceConfirmApplyButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "#9333ea",
+    alignItems: "center",
+  },
+  voiceConfirmApplyText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#fff",
   },
   completeModalIconWrap: {
     width: 80,
@@ -2230,17 +2615,33 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 10,
-    backgroundColor: "#ede9fe",
     borderWidth: 1.5,
+  },
+  sortFilterButtonSelected: {
+    backgroundColor: "#ede9fe",
     borderColor: "#e9d5ff",
   },
-  sortFilterButtonText: {
+  sortFilterButtonUnselected: {
+    backgroundColor: "#f3f4f6",
+    borderColor: "#e5e7eb",
+  },
+  sortFilterButtonTextSelected: {
     fontSize: 13,
     fontWeight: "600",
     color: "#9333ea",
   },
+  sortFilterButtonTextUnselected: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
 
-  listContent: { padding: 16, paddingTop: 12, gap: 12 },
+  listContent: {
+    padding: 16,
+    paddingTop: 12,
+    paddingBottom: 180,
+    gap: 12,
+  },
 
   subtabBar: {
     flexDirection: "row",
@@ -2279,7 +2680,7 @@ const styles = StyleSheet.create({
   graveyardScrollContent: {
     padding: 16,
     paddingTop: 12,
-    paddingBottom: 32,
+    paddingBottom: 180,
     gap: 12,
   },
   graveyardScrollContentEmpty: {
@@ -2301,6 +2702,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#e5e7eb",
     overflow: "hidden",
+  },
+  taskCardHighlight: {
+    shadowColor: "#9333ea",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 8,
+    borderColor: "#9333ea",
   },
   taskCardCompleted: { borderColor: "#86efac", backgroundColor: "#f0fdf4" },
   taskCardActive: { opacity: 0.95 },
@@ -2487,6 +2896,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 24,
+    paddingTop: 48,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
@@ -2657,6 +3067,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 20,
     padding: 24,
+    paddingTop: 48,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
