@@ -19,7 +19,6 @@ import CuteAvatar from './CuteAvatar';
 type NavigationProp = BottomTabNavigationProp<{
   Braindump: undefined;
   Tasks: undefined;
-  Buddy: undefined;
 }>;
 import {
   requestMicrophonePermission,
@@ -27,7 +26,9 @@ import {
   stopRecording,
 } from '../services/audioRecording';
 import { transcribeAudio, isTranscriptionAvailable } from '../services/transcription';
-import { transcriptToTaskTitles } from '../services/splitTask';
+import { transcriptToTaskTitlesWithDueDates } from '../services/splitTask';
+import { speakAvatarMessageIfSet, stopAvatarSpeech } from '../services/avatarSpeech';
+import { format, parseISO } from 'date-fns';
 
 interface BraindumpModeProps {
   onTasksCreated: (tasks: Task[]) => void;
@@ -44,7 +45,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
   const [reviewTasksVisible, setReviewTasksVisible] = useState(false);
-  const [pendingTasks, setPendingTasks] = useState<{ title: string; include: boolean }[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<{ title: string; include: boolean; dueDate?: string }[]>([]);
   const [manualTaskTitle, setManualTaskTitle] = useState('');
 
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -355,13 +356,27 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     setIsProcessing(true);
 
     try {
-      const titles = await transcriptToTaskTitles(text);
-      const list = titles.length > 0 ? titles : fallbackParseTitles(text);
-      setPendingTasks(list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })));
+      const withDue = await transcriptToTaskTitlesWithDueDates(text);
+      if (withDue.length > 0) {
+        setPendingTasks(
+          withDue.map((item) => ({
+            title: item.title.trim() || 'Untitled task',
+            include: true,
+            dueDate: item.dueDate,
+          })),
+        );
+      } else {
+        const list = fallbackParseTitles(text);
+        setPendingTasks(
+          list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })),
+        );
+      }
       setReviewTasksVisible(true);
     } catch (_) {
       const list = fallbackParseTitles(text);
-      setPendingTasks(list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })));
+      setPendingTasks(
+        list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })),
+      );
       setReviewTasksVisible(true);
     } finally {
       setIsProcessing(false);
@@ -396,6 +411,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       title: p.title.trim(),
       subtasks: [],
       createdAt: new Date(),
+      dueDate: p.dueDate,
     }));
     onTasksCreated(tasks);
     setReviewTasksVisible(false);
@@ -431,6 +447,19 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     if (transcript) return "Got it! Ready to create tasks when you are! ✨";
     return "Tell me what's on your mind! 💭";
   };
+
+  const lastSpokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    const msg = getAvatarMessage();
+    if (msg !== lastSpokenRef.current) {
+      lastSpokenRef.current = msg;
+      speakAvatarMessageIfSet(msg);
+    }
+  }, [isProcessing, isRecording, transcript]);
+
+  useEffect(() => {
+    return () => { stopAvatarSpeech(); };
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -612,15 +641,22 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                       {item.include && <Ionicons name="checkmark" size={16} color="#fff" />}
                     </View>
                   </TouchableOpacity>
-                  <TextInput
-                    style={[styles.reviewTaskInput, !item.include && styles.reviewTaskInputDisabled]}
-                    value={item.title}
-                    onChangeText={(t) => updatePendingTaskTitle(index, t)}
-                    placeholder="Tap to edit"
-                    placeholderTextColor="#9ca3af"
-                    editable={item.include}
-                    multiline
-                  />
+                  <View style={styles.reviewTaskInputWrap}>
+                    <TextInput
+                      style={[styles.reviewTaskInput, !item.include && styles.reviewTaskInputDisabled]}
+                      value={item.title}
+                      onChangeText={(t) => updatePendingTaskTitle(index, t)}
+                      placeholder="Tap to edit"
+                      placeholderTextColor="#9ca3af"
+                      editable={item.include}
+                      multiline
+                    />
+                    {item.dueDate && (
+                      <Text style={styles.reviewTaskDueLabel}>
+                        Due {format(parseISO(item.dueDate), 'MMM d')}
+                      </Text>
+                    )}
+                  </View>
                   <TouchableOpacity
                     onPress={() => removePendingTask(index)}
                     style={styles.reviewRowCloseBtn}
@@ -760,18 +796,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#9333ea',
   },
   doneButton: {
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#9333ea',
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1.5,
+    borderColor: '#d1d5db',
     borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 32,
+    paddingHorizontal: 16,
     marginTop: 8,
   },
   doneButtonText: {
-    color: '#9333ea',
+    color: '#6b7280',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   recordHint: { fontSize: 14, color: '#6b7280', textAlign: 'center' },
 
@@ -785,12 +821,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     flex: 1,
   },
   createButtonPrimary: { backgroundColor: '#9333ea' },
-  createButtonSecondary: { backgroundColor: '#f3f4f6' },
+  createButtonSecondary: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1.5,
+    borderColor: '#d1d5db',
+  },
   createButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   clearButtonText: { color: '#6b7280', fontSize: 16, fontWeight: '600' },
   buttonDisabled: { opacity: 0.6 },
@@ -855,17 +896,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
+    padding: 24,
   },
   reviewModalCard: {
     width: '96%',
     height: '96%',
     maxHeight: 700,
-    backgroundColor: 'white',
-    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
     overflow: 'hidden',
     margin: 12,
-    borderWidth: 1,
-    borderColor: '#e9d5ff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 12,
   },
   reviewModalContainer: {
     flex: 1,
@@ -967,6 +1012,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#9333ea',
     borderColor: '#9333ea',
   },
+  reviewTaskInputWrap: { flex: 1 },
   reviewTaskInput: {
     flex: 1,
     fontSize: 16,
@@ -977,6 +1023,11 @@ const styles = StyleSheet.create({
   },
   reviewTaskInputDisabled: {
     color: '#9ca3af',
+  },
+  reviewTaskDueLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
   },
   reviewRowCloseBtn: { padding: 4 },
   reviewModalFooter: {
@@ -994,12 +1045,12 @@ const styles = StyleSheet.create({
     gap: 8,
     alignSelf: 'stretch',
     paddingVertical: 12,
-    paddingHorizontal: 18,
-    minHeight: 44,
-    borderRadius: 500,
+    paddingHorizontal: 16,
+    minHeight: 48,
+    borderRadius: 12,
     backgroundColor: '#9333ea',
   },
-  reviewConfirmBtnText: { fontSize: 17, fontWeight: '600', color: '#ffffff' },
+  reviewConfirmBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
 
   liveTranscript: {
     marginTop: 16,

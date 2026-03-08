@@ -197,6 +197,113 @@ export async function transcriptToTaskTitles(transcript: string): Promise<string
   }
 }
 
+export interface TaskTitleWithDue {
+  title: string;
+  dueDate?: string; // YYYY-MM-DD
+}
+
+/**
+ * Extract task titles and optional due dates from a voice transcript.
+ * E.g. "Buy groceries due tomorrow" -> { title: "Buy groceries", dueDate: "2025-03-08" }.
+ * Returns array of { title, dueDate? }. dueDate is ISO date string YYYY-MM-DD when mentioned.
+ */
+export async function transcriptToTaskTitlesWithDueDates(
+  transcript: string
+): Promise<TaskTitleWithDue[]> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error(
+      'Anthropic API key is not configured. Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file.'
+    );
+  }
+
+  const trimmed = transcript.trim();
+  if (!trimmed) return [];
+
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+
+  let response: Response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 500,
+        system: `You extract a list of tasks from a voice transcript. For each task, output a short title and an optional due date if the user said one (e.g. "due tomorrow", "by Friday", "next week").
+Rules:
+- Remove filler ("I need to", "um", "like"). Output only a JSON array of objects.
+- Each object: { "title": "Short task title" } or { "title": "Short task title", "dueDate": "YYYY-MM-DD" }.
+- dueDate must be YYYY-MM-DD only. If the user said "tomorrow" use ${tomorrowStr}. If they said "today" use ${todayStr}. For "next week" use 7 days from today. For weekday names, use the next occurrence of that day.
+- No numbering or explanation. Example: [{"title": "Buy groceries", "dueDate": "2025-03-08"}, {"title": "Call mom"}]`,
+        messages: [
+          {
+            role: 'user',
+            content: `Extract task titles and any due dates from this transcript:\n\n${trimmed}`,
+          },
+        ],
+      }),
+    });
+  } catch (networkErr) {
+    const msg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(`Network error: ${msg}. Check your connection.`);
+  }
+
+  const body = await response.text();
+
+  if (!response.ok) {
+    let message = `API error ${response.status}`;
+    try {
+      const j = JSON.parse(body) as { error?: { message?: string; type?: string } };
+      if (j.error?.message) message = j.error.message;
+      else if (j.error?.type) message = `${j.error.type}: ${message}`;
+    } catch (_) {
+      if (body.length < 200) message = body || message;
+    }
+    throw new Error(message);
+  }
+
+  let data: { content?: Array<{ type: string; text?: string }> };
+  try {
+    data = JSON.parse(body) as { content?: Array<{ type: string; text?: string }> };
+  } catch (_) {
+    throw new Error('Invalid response from API');
+  }
+  const raw = data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
+
+  let json = raw;
+  const codeMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeMatch) json = codeMatch[1].trim();
+
+  try {
+    const arr = JSON.parse(json) as unknown;
+    if (!Array.isArray(arr)) return [];
+    const items = arr
+      .filter((x): x is Record<string, unknown> => x != null && typeof x === 'object')
+      .map((o) => {
+        const title = typeof o.title === 'string' ? o.title.trim() : '';
+        const dueDate =
+          typeof o.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate)
+            ? o.dueDate
+            : undefined;
+        return { title, dueDate };
+      })
+      .filter((item) => item.title.length > 0);
+    return items;
+  } catch (_) {
+    const titles = transcriptToTaskTitles(transcript);
+    return titles.then((t) => t.map((title) => ({ title })));
+  }
+}
+
 /**
  * Use the voice transcript to edit or add subtasks for a task.
  * Given the task title, current subtasks, and what the user said, returns the new list of subtask texts.

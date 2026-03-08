@@ -1,20 +1,29 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { addDays, format } from 'date-fns';
 import type { Task, GameState } from '../../../App.native';
 import CuteAvatar from './CuteAvatar';
+import { getRecommendedTask } from '../services/prioritize';
+import { speakAvatarMessageIfSet, stopAvatarSpeech } from '../services/avatarSpeech';
+
+type NavParamList = { Braindump: undefined; Tasks: undefined; Buddy: undefined };
 
 interface Message {
   id: string;
   type: 'user' | 'avatar';
   text: string;
   timestamp: Date;
+  recommendedTask?: Task;
 }
 
 interface AvatarCompanionProps {
   tasks: Task[];
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onAddSubtask: (taskId: string, text: string) => void;
+  onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
   gameState: GameState;
 }
 
@@ -25,7 +34,8 @@ const encouragementMessages = [
   "You're making it happen! 🎯",
 ];
 
-export default function AvatarCompanion({ tasks, gameState }: AvatarCompanionProps) {
+export default function AvatarCompanion({ tasks, gameState, onUpdateTask }: AvatarCompanionProps) {
+  const navigation = useNavigation<BottomTabNavigationProp<NavParamList, 'Buddy'>>();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -42,18 +52,84 @@ export default function AvatarCompanion({ tasks, gameState }: AvatarCompanionPro
     scrollViewRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  const parseUserMessage = (text: string): string => {
+  const lastSpokenMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.type === 'avatar' && lastMsg.id !== lastSpokenMessageIdRef.current) {
+      lastSpokenMessageIdRef.current = lastMsg.id;
+      speakAvatarMessageIfSet(lastMsg.text);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    return () => { stopAvatarSpeech(); };
+  }, []);
+
+  const isPrioritizationQuestion = (text: string): boolean => {
+    const lower = text.toLowerCase().trim();
+    return (
+      lower.includes('what should i do first') ||
+      lower.includes('what\'s most important') ||
+      lower.includes('prioritize') ||
+      lower.includes('what task should i') ||
+      lower.includes('which task first') ||
+      lower.includes('what to do first') ||
+      lower === 'what first'
+    );
+  };
+
+  const parseSetDueDate = (msg: string): { task: Task; dueDate: string } | null => {
+    const lower = msg.toLowerCase().trim();
+    const today = new Date();
+    let dueDateStr: string | null = null;
+    if (lower.includes('tomorrow')) dueDateStr = format(addDays(today, 1), 'yyyy-MM-dd');
+    else if (lower.includes('today')) dueDateStr = format(today, 'yyyy-MM-dd');
+    else if (lower.includes('next week')) dueDateStr = format(addDays(today, 7), 'yyyy-MM-dd');
+    if (!dueDateStr) return null;
+
+    const setMatch = msg.match(/set\s+(.+?)\s+due\s+(tomorrow|today|next\s+week)/i);
+    const simpleMatch = msg.match(/(.+?)\s+due\s+(tomorrow|today|next\s+week)/i);
+    const taskTitlePart = (setMatch?.[1] ?? simpleMatch?.[1])?.trim();
+    const taskToUpdate = taskTitlePart
+      ? tasks.find((t) => t.title.toLowerCase().includes(taskTitlePart.toLowerCase()) || taskTitlePart.toLowerCase().includes(t.title.toLowerCase()))
+      : tasks[0];
+    if (taskToUpdate) return { task: taskToUpdate, dueDate: dueDateStr };
+    return null;
+  };
+
+  const getResponse = (text: string): { text: string; recommendedTask?: Task } => {
     const lowerText = text.toLowerCase();
-    
+
+    if (isPrioritizationQuestion(text)) {
+      const rec = getRecommendedTask(tasks);
+      if (rec) {
+        return {
+          text: `Start with **${rec.task.title}** — ${rec.reason}. 💜`,
+          recommendedTask: rec.task,
+        };
+      }
+      return { text: 'You have no tasks right now. Add some from the Braindump tab and I\'ll help you prioritize! 🌟' };
+    }
+
+    if (lowerText.includes('due') && (lowerText.includes('tomorrow') || lowerText.includes('today') || lowerText.includes('next week'))) {
+      const parsed = parseSetDueDate(text);
+      if (parsed) {
+        onUpdateTask(parsed.task.id, { dueDate: parsed.dueDate });
+        return { text: `Done! I set "${parsed.task.title}" due ${parsed.dueDate}. 📅` };
+      }
+      if (tasks.length === 0) return { text: 'You have no tasks yet. Add some from the Braindump tab first! 🌟' };
+      return { text: 'I couldn\'t match that to a task. Try "Set [task name] due tomorrow" or "due tomorrow for [task name]". 💜' };
+    }
+
     if (lowerText.includes('done') || lowerText.includes('finished')) {
-      return `${encouragementMessages[Math.floor(Math.random() * encouragementMessages.length)]} That's awesome progress!`;
+      return { text: `${encouragementMessages[Math.floor(Math.random() * encouragementMessages.length)]} That's awesome progress!` };
     }
-    
+
     if (lowerText.includes('overwhelmed') || lowerText.includes('stressed')) {
-      return `Take a breath - you don't have to do everything right now. Let's focus on just ONE thing. 🌸`;
+      return { text: `Take a breath - you don't have to do everything right now. Let's focus on just ONE thing. 🌸` };
     }
-    
-    return `I'm listening! Tell me more - how can I support you right now? 💙`;
+
+    return { text: `I'm listening! Tell me more - how can I support you right now? 💙` };
   };
 
   const handleSendMessage = () => {
@@ -63,22 +139,24 @@ export default function AvatarCompanion({ tasks, gameState }: AvatarCompanionPro
       id: Date.now().toString(),
       type: 'user',
       text: inputText,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInputText('');
     setIsTyping(true);
 
     setTimeout(() => {
+      const { text, recommendedTask } = getResponse(inputText);
       const avatarResponse: Message = {
         id: (Date.now() + 1).toString(),
         type: 'avatar',
-        text: parseUserMessage(inputText),
-        timestamp: new Date()
+        text,
+        timestamp: new Date(),
+        recommendedTask,
       };
-      
-      setMessages(prev => [...prev, avatarResponse]);
+
+      setMessages((prev) => [...prev, avatarResponse]);
       setIsTyping(false);
     }, 1000);
   };
@@ -138,8 +216,18 @@ export default function AvatarCompanion({ tasks, gameState }: AvatarCompanionPro
               styles.messageText,
               message.type === 'user' && styles.userMessageText
             ]}>
-              {message.text}
+              {message.text.replace(/\*\*(.*?)\*\*/g, '$1')}
             </Text>
+            {message.type === 'avatar' && message.recommendedTask && (
+              <TouchableOpacity
+                style={styles.goToTaskButton}
+                onPress={() => navigation.navigate('Tasks')}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="list" size={16} color="#9333ea" />
+                <Text style={styles.goToTaskButtonText}>Go to task</Text>
+              </TouchableOpacity>
+            )}
             <Text style={[
               styles.messageTime,
               message.type === 'user' && styles.userMessageTime
@@ -208,7 +296,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#9333ea',
     marginHorizontal: 16,
     marginTop: -10,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -254,6 +342,24 @@ const styles = StyleSheet.create({
   userMessageText: {
     color: '#fff',
   },
+  goToTaskButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#ede9fe',
+    borderWidth: 1.5,
+    borderColor: '#e9d5ff',
+    alignSelf: 'flex-start',
+  },
+  goToTaskButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#9333ea',
+  },
   messageTime: {
     fontSize: 11,
     color: '#6b7280',
@@ -286,7 +392,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#d1d5db',
     borderRadius: 12,
     padding: 12,
@@ -296,7 +402,8 @@ const styles = StyleSheet.create({
   sendButton: {
     backgroundColor: '#9333ea',
     borderRadius: 12,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },

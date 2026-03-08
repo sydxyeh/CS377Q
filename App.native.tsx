@@ -26,7 +26,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import BraindumpMode from "./src/native/components/BraindumpMode";
 import TaskList from "./src/native/components/TaskList";
-import AvatarCompanion from "./src/native/components/AvatarCompanion";
 import Header from "./src/native/components/Header";
 
 // Error Boundary Component
@@ -77,11 +76,15 @@ export interface Subtask {
   completed: boolean;
 }
 
+export type TaskPriority = "low" | "medium" | "high";
+
 export interface Task {
   id: string;
   title: string;
   subtasks: Subtask[];
   createdAt: Date;
+  dueDate?: string; // ISO date string (YYYY-MM-DD)
+  priority?: TaskPriority;
 }
 
 export interface FinishedTask extends Task {
@@ -212,14 +215,22 @@ export default function App() {
   const [showCelebration, setShowCelebration] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [completedTabJustUpdated, setCompletedTabJustUpdated] = useState(false);
+  const [tasksLoaded, setTasksLoaded] = useState(false);
 
   useEffect(() => {
     loadGameStateOnly();
+    loadTasks();
   }, []);
 
   useEffect(() => {
     saveGameState();
   }, [gameState]);
+
+  useEffect(() => {
+    if (tasksLoaded) {
+      saveTasks();
+    }
+  }, [tasks, finishedTasks, tasksLoaded]);
 
   const loadGameStateOnly = async () => {
     try {
@@ -229,6 +240,91 @@ export default function App() {
       }
     } catch (error) {
       console.error("Error loading data:", error);
+    }
+  };
+
+  const TASKS_STORAGE_KEY = "adhd-tasks";
+
+  const loadTasks = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(TASKS_STORAGE_KEY);
+      if (!raw) {
+        setTasksLoaded(true);
+        return;
+      }
+      const data = JSON.parse(raw) as {
+        tasks?: unknown[];
+        finishedTasks?: unknown[];
+      };
+      const parseTask = (t: unknown): Task => {
+        const o = t as Record<string, unknown>;
+        const id = String(o?.id ?? "");
+        const createdAt = o.createdAt
+          ? new Date(o.createdAt as string)
+          : new Date();
+        return {
+          id,
+          title: String(o?.title ?? ""),
+          subtasks: Array.isArray(o?.subtasks)
+            ? (o.subtasks as Subtask[]).map((s, i) => ({
+                id: String((s as { id?: string }).id ?? `${id}-sub-${i}`),
+                text: String((s as { text?: string }).text ?? ""),
+                completed: Boolean((s as { completed?: boolean }).completed),
+              }))
+            : [],
+          createdAt,
+          dueDate:
+            typeof o?.dueDate === "string" && o.dueDate
+              ? o.dueDate
+              : undefined,
+          priority:
+            o?.priority === "low" ||
+            o?.priority === "medium" ||
+            o?.priority === "high"
+              ? o.priority
+              : undefined,
+        };
+      };
+      if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+        setTasks(data.tasks.map(parseTask));
+      }
+      if (Array.isArray(data.finishedTasks) && data.finishedTasks.length > 0) {
+        setFinishedTasks(
+          data.finishedTasks.map((ft) => {
+            const task = parseTask(ft);
+            const o = ft as Record<string, unknown>;
+            return {
+              ...task,
+              completedAt: String(o?.completedAt ?? new Date().toISOString()),
+            };
+          }),
+        );
+      }
+    } catch (error) {
+      console.error("Error loading tasks:", error);
+    } finally {
+      setTasksLoaded(true);
+    }
+  };
+
+  const saveTasks = async () => {
+    try {
+      const payload = {
+        tasks: tasks.map((t) => ({
+          ...t,
+          createdAt: t.createdAt instanceof Date ? t.createdAt.toISOString() : t.createdAt,
+        })),
+        finishedTasks: finishedTasks.map((ft) => ({
+          ...ft,
+          createdAt:
+            ft.createdAt instanceof Date
+              ? ft.createdAt.toISOString()
+              : ft.createdAt,
+        })),
+      };
+      await AsyncStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error("Error saving tasks:", error);
     }
   };
 
@@ -325,6 +421,14 @@ export default function App() {
           t.createdAt instanceof Date
             ? t.createdAt
             : new Date(t.createdAt as unknown as string),
+        dueDate:
+          typeof t.dueDate === "string" && t.dueDate ? t.dueDate : undefined,
+        priority:
+          t.priority === "low" ||
+          t.priority === "medium" ||
+          t.priority === "high"
+            ? t.priority
+            : undefined,
       };
     });
     setTasks((prev) => [...normalized, ...prev]);

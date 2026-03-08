@@ -30,7 +30,7 @@ import type {
   FinishedTask,
   Subtask,
 } from "../../../App.native";
-import { format } from "date-fns";
+import { format, addDays, parseISO, startOfDay, isBefore, isToday, parse, isValid, differenceInDays } from "date-fns";
 import {
   generateSubtasks,
   isSplitTaskAvailable,
@@ -45,6 +45,8 @@ import {
   transcribeAudio,
   isTranscriptionAvailable,
 } from "../services/transcription";
+import { getRecommendedTask } from "../services/prioritize";
+import CuteAvatar from "./CuteAvatar";
 
 type TasksSubTab = "current" | "completed";
 
@@ -117,11 +119,53 @@ export default function TaskList({
   ] = useState<string | null>(null);
   const [showChooseTaskForSubtaskHelper, setShowChooseTaskForSubtaskHelper] =
     useState(false);
+  const [dueDateModalTask, setDueDateModalTask] = useState<Task | null>(null);
+  const [dueDateInput, setDueDateInput] = useState("");
 
   const [orderedIds, setOrderedIds] = useState<string[]>(() =>
     tasks.map((t) => t.id),
   );
   const prevTaskCountRef = useRef(tasks.length);
+
+  useEffect(() => {
+    if (dueDateModalTask) {
+      if (
+        dueDateModalTask.dueDate &&
+        /^\d{4}-\d{2}-\d{2}$/.test(dueDateModalTask.dueDate)
+      ) {
+        const d = parseISO(dueDateModalTask.dueDate);
+        setDueDateInput(format(d, "MMM d, yyyy"));
+      } else {
+        setDueDateInput("");
+      }
+    }
+  }, [dueDateModalTask]);
+
+  const parseDateInput = (input: string): string | null => {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const ref = new Date();
+    const formats = [
+      "yyyy-MM-dd",
+      "M/d/yyyy",
+      "MM/dd/yyyy",
+      "M-d-yyyy",
+      "MM-d-yyyy",
+      "M/d/yy",
+      "MMM d, yyyy",
+      "MMMM d, yyyy",
+      "MMM d yyyy",
+    ];
+    for (const fmt of formats) {
+      try {
+        const d = parse(trimmed, fmt, ref);
+        if (isValid(d)) return format(d, "yyyy-MM-dd");
+      } catch {
+        // try next format
+      }
+    }
+    return null;
+  };
 
   useEffect(() => {
     setOrderedIds(tasks.map((t) => t.id));
@@ -210,6 +254,9 @@ export default function TaskList({
               }))
             : [],
           createdAt: t.createdAt instanceof Date ? t.createdAt : new Date(),
+          dueDate:
+            typeof t.dueDate === "string" && t.dueDate ? t.dueDate : undefined,
+          priority: t.priority,
         };
         map.set(safe.id, safe);
       }
@@ -496,14 +543,136 @@ export default function TaskList({
     }
   };
 
-  const getTaskPriorityColor = (priority: number) => {
-    const p = Math.min(Math.max(priority, 1), 10);
+  const getPriorityTabStyle = (
+    priority: Task["priority"],
+    isExpanded: boolean,
+  ): { backgroundColor?: string; borderLeftColor?: string } => {
+    if (!priority) return {};
+    switch (priority) {
+      case "high":
+        return { backgroundColor: "#ede9fe", borderLeftColor: "#c4b5fd" };
+      case "medium":
+        return { backgroundColor: "#dbeafe", borderLeftColor: "#93c5fd" };
+      case "low":
+        return { backgroundColor: "#f3f4f6", borderLeftColor: "#d1d5db" };
+      default:
+        return {};
+    }
+  };
 
-    const start = 65; // dark
-    const end = 140;
-    const lightness = start + ((p - 1) / 12) * (end - start);
+  const getPriorityChipInactiveStyle = (
+    priority: Task["priority"],
+  ): {
+    backgroundColor: string;
+    borderColor: string;
+    color: string;
+  } => {
+    switch (priority) {
+      case "high":
+        return {
+          backgroundColor: "#ede9fe",
+          borderColor: "#ddd6fe",
+          color: "#c4b5fd",
+        };
+      case "medium":
+        return {
+          backgroundColor: "#dbeafe",
+          borderColor: "#bfdbfe",
+          color: "#60a5fa",
+        };
+      case "low":
+        return {
+          backgroundColor: "#f3f4f6",
+          borderColor: "#e5e7eb",
+          color: "#6b7280",
+        };
+      default:
+        return {
+          backgroundColor: "#f3f4f6",
+          borderColor: "#e5e7eb",
+          color: "#6b7280",
+        };
+    }
+  };
 
-    return `hsl(270, 60%, ${lightness}%)`;
+  const getPriorityChipActiveStyle = (
+    p: "high" | "medium" | "low",
+  ): { backgroundColor: string; borderWidth: number; borderColor: string } => {
+    switch (p) {
+      case "high": {
+        const bg = "#8b5cf6";
+        return {
+          backgroundColor: bg,
+          borderWidth: 1.5,
+          borderColor: bg,
+        };
+      }
+      case "medium": {
+        const bg = "#3b82f6";
+        return {
+          backgroundColor: bg,
+          borderWidth: 1.5,
+          borderColor: bg,
+        };
+      }
+      case "low": {
+        const bg = "#9ca3af";
+        return {
+          backgroundColor: bg,
+          borderWidth: 1.5,
+          borderColor: bg,
+        };
+      }
+    }
+  };
+
+  const getPriorityChipTextColor = (
+    p: "high" | "medium" | "low",
+  ): string => {
+    return "#fff";
+  };
+
+  const getDueDateLabel = (dueDateStr: string | undefined): string | null => {
+    if (!dueDateStr) return null;
+    try {
+      const d = startOfDay(parseISO(dueDateStr));
+      const today = startOfDay(new Date());
+      if (isBefore(d, today)) return "Overdue";
+      return format(d, "MMM d");
+    } catch {
+      return null;
+    }
+  };
+
+  const isOverdue = (dueDateStr: string | undefined): boolean => {
+    if (!dueDateStr) return false;
+    try {
+      return isBefore(startOfDay(parseISO(dueDateStr)), startOfDay(new Date()));
+    } catch {
+      return false;
+    }
+  };
+
+  /** Priority for display only: derived from due date (soonest due = high, then medium, then low). */
+  const getDerivedPriority = (
+    dueDateStr: string | undefined,
+  ): "high" | "medium" | "low" => {
+    if (!dueDateStr) return "low";
+    try {
+      const d = startOfDay(parseISO(dueDateStr));
+      const today = startOfDay(new Date());
+      const daysUntil = differenceInDays(d, today);
+      if (daysUntil <= 0) return "high"; // overdue or today = soonest
+      if (daysUntil <= 7) return "medium"; // within a week
+      return "low";
+    } catch {
+      return "low";
+    }
+  };
+
+  const setTaskDueDate = (taskId: string, dueDate: string | undefined) => {
+    onUpdateTask(taskId, { dueDate });
+    setDueDateModalTask(null);
   };
 
   const stopVoiceRecording = async () => {
@@ -589,95 +758,180 @@ export default function TaskList({
       const isEditingTitle = editingTaskTitleId === task.id;
       const isCompleting = completingTaskId === task.id;
 
+      const displayPriority = getDerivedPriority(task.dueDate);
+      const priorityTabStyle = !isCompleting
+        ? getPriorityTabStyle(displayPriority, isExpanded)
+        : {};
       const cardContent = (
         <>
-          <View style={styles.taskHeader}>
-            <TouchableOpacity
-              onLongPress={drag}
-              style={styles.taskDragHandle}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="reorder-two" size={20} color="#9ca3af" />
-            </TouchableOpacity>
+          <View
+            style={[
+              styles.taskHeader,
+              isExpanded && priorityTabStyle.backgroundColor
+                ? { backgroundColor: priorityTabStyle.backgroundColor }
+                : {},
+            ]}
+          >
+            <View style={styles.taskHeaderTopRow}>
+              <TouchableOpacity
+                onLongPress={drag}
+                style={styles.taskDragHandle}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="reorder-two" size={20} color="#9ca3af" />
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.taskHeaderContent}
-              onPress={() => !isCompleting && toggleExpanded(task.id)}
-              onLongPress={() => {
-                if (!isCompleting) {
-                  setEditingTaskTitleId(task.id);
-                  setDraftTaskTitle(task.title);
-                }
-              }}
-              activeOpacity={0.85}
-            >
-              {isEditingTitle ? (
-                <View style={styles.taskTitleRow}>
-                  <Text style={styles.taskNumberPrefix}>{taskNumber}.</Text>
-                  <TextInput
-                    style={styles.taskTitleInput}
-                    value={draftTaskTitle}
-                    onChangeText={setDraftTaskTitle}
-                    onSubmitEditing={() => submitTaskTitleEdit(task.id)}
-                    onBlur={() => submitTaskTitleEdit(task.id)}
-                    autoFocus
-                    selectTextOnFocus
-                    placeholder="Task title"
-                    placeholderTextColor="#9ca3af"
-                  />
+              <TouchableOpacity
+                style={styles.taskHeaderContent}
+                onPress={() => !isCompleting && toggleExpanded(task.id)}
+                onLongPress={() => {
+                  if (!isCompleting) {
+                    setEditingTaskTitleId(task.id);
+                    setDraftTaskTitle(task.title);
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <View style={styles.taskTitleBlock}>
+                  {isEditingTitle ? (
+                    <View style={styles.taskTitleRow}>
+                      <Text style={styles.taskNumberPrefix}>{taskNumber}.</Text>
+                      <TextInput
+                        style={styles.taskTitleInput}
+                        value={draftTaskTitle}
+                        onChangeText={setDraftTaskTitle}
+                        onSubmitEditing={() => submitTaskTitleEdit(task.id)}
+                        onBlur={() => submitTaskTitleEdit(task.id)}
+                        autoFocus
+                        selectTextOnFocus
+                        placeholder="Task title"
+                        placeholderTextColor="#9ca3af"
+                      />
+                    </View>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.taskTitle,
+                        isCompleting && styles.taskTitleCompleting,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {taskNumber}. {task.title}
+                    </Text>
+                  )}
+                  {totalCount > 0 && !isCompleting && (
+                    <Text style={styles.taskMeta} numberOfLines={1}>
+                      {doneCount}/{totalCount} done
+                    </Text>
+                  )}
+                  {isCompleting && (
+                    <Text style={styles.taskMovingLabel}>
+                      Moving to completed ✓
+                    </Text>
+                  )}
                 </View>
-              ) : (
-                <Text
-                  style={[
-                    styles.taskTitle,
-                    isCompleting && styles.taskTitleCompleting,
-                  ]}
+              </TouchableOpacity>
+
+              <View style={styles.taskHeaderActions}>
+                {!isCompleting && (
+                  <TouchableOpacity
+                    onPress={() => handleCompletePress(task)}
+                    style={styles.markDonePill}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.markDonePillText}>Mark done</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.expandHit}
+                  onPress={() => !isCompleting && toggleExpanded(task.id)}
+                  activeOpacity={0.8}
                 >
-                  {taskNumber}. {task.title}
-                </Text>
-              )}
-              {totalCount > 0 && !isCompleting && (
-                <Text style={styles.taskMeta}>
-                  {doneCount}/{totalCount} complete
-                </Text>
-              )}
-              {isCompleting && (
-                <Text style={styles.taskMovingLabel}>
-                  Moving to completed ✓
-                </Text>
-              )}
-            </TouchableOpacity>
+                  <Ionicons
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={22}
+                    color="#6b7280"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
 
             {!isCompleting && (
               <TouchableOpacity
-                onPress={() => handleCompletePress(task)}
-                style={[
-                  styles.completeButton,
-                  isCompleted && styles.completeButtonDone,
-                ]}
+                style={styles.taskMetaRowWrapper}
+                onPress={() => toggleExpanded(task.id)}
                 activeOpacity={0.85}
               >
-                {isCompleted ? (
-                  <Ionicons name="checkmark-circle" size={26} color="#10b981" />
-                ) : (
-                  <Text style={styles.completeButtonText}>
-                    Mark as complete
-                  </Text>
-                )}
+                <View style={styles.taskHeaderSpacer} />
+                <View style={styles.taskMetaRow}>
+                  <TouchableOpacity
+                    onPress={() => setDueDateModalTask(task)}
+                    activeOpacity={0.85}
+                    style={styles.dueDateMetaItem}
+                  >
+                    {task.dueDate ? (
+                      <View
+                        style={[
+                          styles.dueDatePill,
+                          !isOverdue(task.dueDate) &&
+                            getPriorityChipActiveStyle(displayPriority),
+                          isOverdue(task.dueDate) && styles.dueDatePillOverdue,
+                        ]}
+                      >
+                        <Ionicons
+                          name="calendar-outline"
+                          size={12}
+                          color={
+                            isOverdue(task.dueDate)
+                              ? "#dc2626"
+                              : getPriorityChipTextColor(displayPriority)
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.dueDatePillText,
+                            !isOverdue(task.dueDate) && {
+                              color: getPriorityChipTextColor(displayPriority),
+                            },
+                            isOverdue(task.dueDate) &&
+                              styles.dueDatePillTextOverdue,
+                          ]}
+                        >
+                          {getDueDateLabel(task.dueDate)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.dueDatePill,
+                          getPriorityChipInactiveStyle(displayPriority),
+                        ]}
+                      >
+                        <Ionicons
+                          name="calendar-outline"
+                          size={12}
+                          color={
+                            getPriorityChipInactiveStyle(displayPriority).color
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.dueDatePillText,
+                            {
+                              color: getPriorityChipInactiveStyle(
+                                displayPriority,
+                              ).color,
+                            },
+                          ]}
+                        >
+                          Set due date
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </TouchableOpacity>
             )}
-
-            <TouchableOpacity
-              style={styles.expandHit}
-              onPress={() => !isCompleting && toggleExpanded(task.id)}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={isExpanded ? "chevron-up" : "chevron-down"}
-                size={20}
-                color="#6b7280"
-              />
-            </TouchableOpacity>
           </View>
 
           {isExpanded && !isCompleting && (
@@ -967,7 +1221,6 @@ export default function TaskList({
         <Animated.View
           style={[
             styles.taskCard,
-            { backgroundColor: getTaskPriorityColor(taskNumber) },
             styles.taskCardCompleting,
             isActive && styles.taskCardActive,
             {
@@ -982,9 +1235,19 @@ export default function TaskList({
         <View
           style={[
             styles.taskCard,
-            { backgroundColor: getTaskPriorityColor(taskNumber) },
             isCompleted && styles.taskCardCompleted,
             isActive && styles.taskCardActive,
+            !isExpanded &&
+              !isCompleted &&
+              getPriorityTabStyle(displayPriority, false).backgroundColor
+              ? {
+                  backgroundColor:
+                    getPriorityTabStyle(displayPriority, false).backgroundColor,
+                  borderLeftWidth: 4,
+                  borderLeftColor:
+                    getPriorityTabStyle(displayPriority, false).borderLeftColor,
+                }
+              : {},
           ]}
         >
           {cardContent}
@@ -1122,44 +1385,139 @@ export default function TaskList({
             </View>
           </View>
         ) : (
-          <DraggableFlatList
-            data={orderedTasks}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            onDragEnd={({ data }) => {
-              setOrderedIds(data.map((t) => t.id));
-              onReorderTasks?.(data);
-            }}
-            contentContainerStyle={styles.listContent}
-            activationDistance={12}
-          />
+          <>
+            {(() => {
+              const recommended = getRecommendedTask(orderedTasks);
+              return recommended ? (
+                <TouchableOpacity
+                  style={styles.startHereBanner}
+                  onPress={() => {
+                    if (!expandedTasks.has(recommended.task.id))
+                      toggleExpanded(recommended.task.id);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <CuteAvatar mood="excited" size="sm" />
+                  <View style={styles.startHereBannerBubble}>
+                    <Text style={styles.startHereBannerTitle}>
+                      Start here! {recommended.task.title}
+                    </Text>
+                    <Text style={styles.startHereBannerReason}>
+                      {recommended.reason}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color="#9333ea"
+                  />
+                </TouchableOpacity>
+              ) : null;
+            })()}
+            <View style={styles.sortRow}>
+              <TouchableOpacity
+                style={styles.sortFilterButton}
+                onPress={() => {
+                  const priorityOrder = { high: 0, medium: 1, low: 2 };
+                  const sorted = [...orderedTasks].sort((a, b) => {
+                    const pa = getDerivedPriority(a.dueDate);
+                    const pb = getDerivedPriority(b.dueDate);
+                    if (priorityOrder[pa] !== priorityOrder[pb])
+                      return priorityOrder[pa] - priorityOrder[pb];
+                    if (!a.dueDate && !b.dueDate) return 0;
+                    if (!a.dueDate) return 1;
+                    if (!b.dueDate) return -1;
+                    return a.dueDate.localeCompare(b.dueDate);
+                  });
+                  setOrderedIds(sorted.map((t) => t.id));
+                  onReorderTasks?.(sorted);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="flag" size={16} color="#9333ea" />
+                <Text style={styles.sortFilterButtonText}>Sort by priority</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.sortFilterButton}
+                onPress={() => {
+                  const sorted = [...orderedTasks].sort((a, b) => {
+                    const aT =
+                      a.createdAt instanceof Date
+                        ? a.createdAt.getTime()
+                        : new Date(a.createdAt as unknown as string).getTime();
+                    const bT =
+                      b.createdAt instanceof Date
+                        ? b.createdAt.getTime()
+                        : new Date(b.createdAt as unknown as string).getTime();
+                    return bT - aT;
+                  });
+                  setOrderedIds(sorted.map((t) => t.id));
+                  onReorderTasks?.(sorted);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="time" size={16} color="#9333ea" />
+                <Text style={styles.sortFilterButtonText}>
+                  Sort by recently added
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <DraggableFlatList
+              data={orderedTasks}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              onDragEnd={({ data }) => {
+                setOrderedIds(data.map((t) => t.id));
+                onReorderTasks?.(data);
+              }}
+              contentContainerStyle={styles.listContent}
+              activationDistance={12}
+            />
+          </>
         )
       ) : (
-        <ScrollView
-          style={styles.graveyardScroll}
-          contentContainerStyle={styles.graveyardScrollContent}
-        >
-          {finishedTasks.length === 0 ? (
-            <View style={styles.graveyardEmpty}>
-              <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
-              <Text style={styles.graveyardEmptyTitle}>
-                No completed tasks yet
-              </Text>
-              <Text style={styles.graveyardEmptyText}>
-                Complete a task to see it here.
-              </Text>
-            </View>
-          ) : (
-            finishedTasks.map((ft) => (
-              <View key={ft.id} style={styles.graveyardCard}>
-                <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
-                <Text style={styles.graveyardMeta}>
-                  Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
+          <ScrollView
+            style={styles.graveyardScroll}
+            contentContainerStyle={[
+              styles.graveyardScrollContent,
+              finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
+            ]}
+          >
+            {finishedTasks.length > 0 && (
+              <View style={styles.completedBanner}>
+                <CuteAvatar mood="excited" size="sm" />
+                <View style={styles.completedBannerBubble}>
+                  <Text style={styles.completedBannerText}>
+                    wow! great job completing{" "}
+                    {finishedTasks.length === 1
+                      ? "1 task"
+                      : `${finishedTasks.length} tasks`}{" "}
+                    :)
+                  </Text>
+                </View>
+              </View>
+            )}
+            {finishedTasks.length === 0 ? (
+              <View style={styles.graveyardEmpty}>
+                <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
+                <Text style={styles.graveyardEmptyTitle}>
+                  No completed tasks yet
+                </Text>
+                <Text style={styles.graveyardEmptyText}>
+                  Complete a task to see it here.
                 </Text>
               </View>
-            ))
-          )}
-        </ScrollView>
+            ) : (
+              finishedTasks.map((ft) => (
+                <View key={ft.id} style={styles.graveyardCard}>
+                  <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
+                  <Text style={styles.graveyardMeta}>
+                    Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
+                  </Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
       )}
 
       {activeSubTab === "current" && tasks.length > 0 && (
@@ -1193,7 +1551,12 @@ export default function TaskList({
             <Text style={styles.subtaskHelperModalMessage}>
               Tap a task to edit its subtasks with voice.
             </Text>
-            <ScrollView style={styles.chooseTaskModalList} nestedScrollEnabled>
+            <ScrollView
+              style={styles.chooseTaskModalList}
+              contentContainerStyle={styles.chooseTaskModalListContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
               {orderedTasks.map((t, index) => (
                 <TouchableOpacity
                   key={t.id}
@@ -1205,9 +1568,11 @@ export default function TaskList({
                   }}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.chooseTaskModalNumber}>{index + 1}.</Text>
-                  <Text style={styles.chooseTaskRowTitle} numberOfLines={2}>
-                    {t.title}
+                  <Text
+                    style={styles.chooseTaskRowTitle}
+                    numberOfLines={2}
+                  >
+                    {index + 1}. {t.title}
                   </Text>
                   <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
                 </TouchableOpacity>
@@ -1246,50 +1611,75 @@ export default function TaskList({
             onPress={(e) => e.stopPropagation()}
             style={styles.voiceModalCard}
           >
-            <Text style={styles.subtaskHelperModalTitle}>Voice agent</Text>
-            <Text style={styles.subtaskHelperModalMessage}>
-              Tell me how to edit or add subtasks for "{voiceTask?.title}". Tap
-              to record, then tap again to stop.
-            </Text>
+            <View style={styles.voiceModalAvatarCard}>
+              <CuteAvatar
+                mood={
+                  voiceProcessing
+                    ? "excited"
+                    : voiceTranscribing
+                      ? "proud"
+                      : voiceRecording
+                        ? "happy"
+                        : "neutral"
+                }
+                size="md"
+              />
+              <View style={styles.voiceModalMessageBox}>
+                <Text style={styles.voiceModalMessageText}>
+                  {voiceProcessing
+                    ? "Updating subtasks..."
+                    : voiceTranscribing
+                      ? "Transcribing..."
+                      : voiceRecording
+                        ? "I'm listening... tell me how to edit subtasks. 💜"
+                        : `Tell me how to edit or add subtasks for "${voiceTask?.title}". Tap the mic when you're ready.`}
+                </Text>
+              </View>
+            </View>
+
             {voiceError ? (
-              <Text style={styles.voiceErrorText}>{voiceError}</Text>
+              <View style={styles.voiceModalErrorWrap}>
+                <Ionicons name="alert-circle" size={18} color="#dc2626" />
+                <Text style={styles.voiceErrorText}>{voiceError}</Text>
+              </View>
             ) : null}
-            {voiceTranscribing && (
-              <Text style={styles.voiceStatusText}>Transcribing...</Text>
-            )}
-            {voiceProcessing && (
-              <Text style={styles.voiceStatusText}>Updating subtasks...</Text>
-            )}
-            {!voiceTranscribing && !voiceProcessing && (
+
+            <View
+              style={[
+                styles.voiceModalVoiceCard,
+                voiceRecording && styles.voiceModalVoiceCardRecording,
+              ]}
+            >
               <TouchableOpacity
                 style={[
-                  styles.voiceRecordButton,
-                  voiceRecording && styles.voiceRecordButtonActive,
+                  styles.voiceModalRecordButton,
+                  voiceRecording && styles.voiceModalRecordButtonActive,
                 ]}
                 onPress={
                   voiceRecording ? stopVoiceRecording : startVoiceRecording
                 }
-                activeOpacity={0.85}
+                disabled={voiceTranscribing || voiceProcessing}
+                activeOpacity={0.9}
               >
                 <Ionicons
-                  name={voiceRecording ? "stop" : "mic"}
-                  size={36}
+                  name={voiceRecording ? "mic-off" : "mic"}
+                  size={48}
                   color="#fff"
                 />
-                <Text style={styles.voiceRecordButtonText}>
-                  {voiceRecording ? "Tap to stop" : "Tap to record"}
-                </Text>
               </TouchableOpacity>
-            )}
-            {!voiceRecording && !voiceTranscribing && !voiceProcessing && (
-              <TouchableOpacity
-                style={styles.subtaskHelperCancel}
-                onPress={() => setVoiceTask(null)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            )}
+              <Text style={styles.voiceModalRecordLabel}>
+                {voiceRecording ? "Tap to stop" : "Tap to record"}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.voiceModalCancel}
+              onPress={() => setVoiceTask(null)}
+              disabled={voiceRecording || voiceTranscribing || voiceProcessing}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.subtaskHelperCancelText}>Cancel</Text>
+            </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1348,6 +1738,128 @@ export default function TaskList({
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <Modal
+        visible={dueDateModalTask !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDueDateModalTask(null)}
+      >
+        <TouchableOpacity
+          style={styles.completeModalOverlay}
+          activeOpacity={1}
+          onPress={() => setDueDateModalTask(null)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={styles.dueDateModalCard}
+          >
+            <Text style={styles.dueDateModalTitle}>Due date</Text>
+            <Text style={styles.dueDateModalTaskName} numberOfLines={1}>
+              {dueDateModalTask?.title}
+            </Text>
+
+            <View style={styles.dueDateSection}>
+              <Text style={styles.dueDateInputLabel}>Enter date</Text>
+              <TextInput
+                style={styles.dueDateInput}
+                value={dueDateInput}
+                onChangeText={setDueDateInput}
+                placeholder="e.g. Mar 8, 2025 or 3/8/2025"
+                placeholderTextColor="#9ca3af"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.dueDateSetDateButton}
+                onPress={() => {
+                  if (!dueDateModalTask) return;
+                  const iso = parseDateInput(dueDateInput);
+                  if (iso) {
+                    setTaskDueDate(dueDateModalTask.id, iso);
+                    setDueDateModalTask(null);
+                  } else if (dueDateInput.trim()) {
+                    Alert.alert(
+                      "Invalid date",
+                      "Try formats like Mar 8, 2025 or 3/8/2025",
+                      [{ text: "OK" }],
+                    );
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dueDateSetDateButtonText}>Set date</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.dueDateSection}>
+              <Text style={styles.dueDateQuickLabel}>Quick pick</Text>
+              <View style={styles.dueDateChipsRow}>
+                <TouchableOpacity
+                  style={styles.dueDateChip}
+                  onPress={() =>
+                    dueDateModalTask &&
+                    setTaskDueDate(
+                      dueDateModalTask.id,
+                      format(new Date(), "yyyy-MM-dd"),
+                    )
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.dueDateChipText}>Today</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dueDateChip}
+                  onPress={() =>
+                    dueDateModalTask &&
+                    setTaskDueDate(
+                      dueDateModalTask.id,
+                      format(addDays(new Date(), 1), "yyyy-MM-dd"),
+                    )
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.dueDateChipText}>Tomorrow</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.dueDateChip}
+                  onPress={() =>
+                    dueDateModalTask &&
+                    setTaskDueDate(
+                      dueDateModalTask.id,
+                      format(addDays(new Date(), 7), "yyyy-MM-dd"),
+                    )
+                  }
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.dueDateChipText}>Next week</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.dueDateModalFooter}>
+              <TouchableOpacity
+                style={styles.dueDateFooterButton}
+                onPress={() =>
+                  dueDateModalTask &&
+                  setTaskDueDate(dueDateModalTask.id, undefined)
+                }
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dueDateClearText}>Clear due date</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dueDateFooterButton}
+                onPress={() => setDueDateModalTask(null)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dueDateCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -1367,11 +1879,11 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 28,
+    padding: 24,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
@@ -1380,11 +1892,11 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 28,
+    padding: 24,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
@@ -1419,11 +1931,17 @@ const styles = StyleSheet.create({
   },
   subtaskHelperCancel: {
     marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+    alignSelf: "stretch",
+    alignItems: "center",
   },
   subtaskHelperCancelText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "600",
     color: "#6b7280",
   },
@@ -1433,10 +1951,10 @@ const styles = StyleSheet.create({
     maxHeight: "80%",
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 28,
+    padding: 24,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
@@ -1475,35 +1993,89 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 28,
-    alignItems: "center",
+    padding: 24,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
+  voiceModalAvatarCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#ede9fe",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  voiceModalMessageBox: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 12,
+  },
+  voiceModalMessageText: {
+    fontSize: 14,
+    color: "#1f2937",
+    lineHeight: 20,
+  },
+  voiceModalErrorWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
   voiceErrorText: {
+    flex: 1,
     fontSize: 13,
     color: "#dc2626",
-    marginBottom: 12,
-    textAlign: "center",
   },
-  voiceStatusText: { fontSize: 14, color: "#6b7280", marginBottom: 12 },
-  voiceRecordButton: {
-    backgroundColor: "#9333ea",
-    paddingVertical: 20,
-    paddingHorizontal: 32,
+  voiceModalVoiceCard: {
+    backgroundColor: "#fff",
     borderRadius: 16,
+    padding: 24,
     alignItems: "center",
-    marginBottom: 12,
+    gap: 12,
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
   },
-  voiceRecordButtonActive: { backgroundColor: "#dc2626" },
-  voiceRecordButtonText: {
+  voiceModalVoiceCardRecording: {
+    backgroundColor: "#f5f3ff",
+    borderColor: "#e9d5ff",
+  },
+  voiceModalRecordButton: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: "#9333ea",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  voiceModalRecordButtonActive: {
+    backgroundColor: "#dc2626",
+  },
+  voiceModalRecordLabel: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#fff",
-    marginTop: 8,
+    color: "#374151",
+  },
+  voiceModalCancel: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
   },
   completeModalIconWrap: {
     width: 80,
@@ -1536,10 +2108,12 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   completeModalButtonCancel: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1553,15 +2127,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: "#10b981",
-    shadowColor: "#10b981",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
   },
   completeModalButtonConfirmText: {
     fontSize: 16,
@@ -1589,6 +2158,81 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: "row", gap: 16, marginTop: 12, flexWrap: "wrap" },
   statItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   statText: { fontSize: 12, color: "#6b7280" },
+
+  startHereBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: "#ede9fe",
+  },
+  startHereBannerBubble: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  startHereBannerTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937",
+  },
+  startHereBannerReason: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+
+  completedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 4,
+  },
+  completedBannerBubble: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 2,
+    borderColor: "#e5e7eb",
+  },
+  completedBannerText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937",
+  },
+
+  sortRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  sortFilterButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#ede9fe",
+    borderWidth: 1.5,
+    borderColor: "#e9d5ff",
+  },
+  sortFilterButtonText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#9333ea",
+  },
 
   listContent: { padding: 16, paddingTop: 12, gap: 12 },
 
@@ -1627,11 +2271,14 @@ const styles = StyleSheet.create({
 
   graveyardScroll: { flex: 1 },
   graveyardScrollContent: {
+    padding: 16,
+    paddingTop: 12,
+    paddingBottom: 32,
+    gap: 12,
+  },
+  graveyardScrollContentEmpty: {
     flexGrow: 1,
     justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-    paddingBottom: 32,
   },
   graveyardEmpty: {
     alignItems: "center",
@@ -1654,18 +2301,37 @@ const styles = StyleSheet.create({
   taskCardCompleting: { borderColor: "#86efac", backgroundColor: "#ecfdf5" },
 
   taskHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingLeft: 4,
-    paddingRight: 16,
-    paddingVertical: 16,
-    gap: 8,
+    flexDirection: "column",
+    paddingLeft: 10,
+    paddingRight: 14,
+    paddingTop: 14,
+    paddingBottom: 14,
   },
-
+  taskHeaderTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  taskHeaderSpacer: {
+    width: 32,
+    flexShrink: 0,
+  },
+  taskMetaRowWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+  },
   dragHandle: { paddingTop: 1, paddingRight: 4 },
-  expandHit: { paddingTop: 2, paddingHorizontal: 4 },
-  taskDragHandle: { padding: 4, justifyContent: "center", marginRight: 4 },
+  expandHit: { padding: 6, justifyContent: "center", alignItems: "center" },
+  taskDragHandle: { padding: 6, justifyContent: "center" },
+  taskTitleBlock: {},
   taskTitleRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  taskHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexShrink: 0,
+  },
   taskNumberPrefix: { fontSize: 16, fontWeight: "600", color: "#6b7280" },
   taskCheckboxHit: {
     paddingTop: 4,
@@ -1719,39 +2385,43 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     backgroundColor: "#ede9fe",
+    borderWidth: 1.5,
+    borderColor: "#e9d5ff",
     minWidth: 110,
   },
-  taskActionButtonText: { fontSize: 13, fontWeight: "600", color: "#9333ea" },
+  taskActionButtonText: { fontSize: 14, fontWeight: "600", color: "#9333ea" },
   taskActionButtonPlaceholder: { minWidth: 110 },
   taskActionButtonDone: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     backgroundColor: "#10b981",
     minWidth: 110,
   },
-  taskActionButtonDoneText: { fontSize: 13, fontWeight: "600", color: "#fff" },
+  taskActionButtonDoneText: { fontSize: 14, fontWeight: "600", color: "#fff" },
 
   graveyardCard: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "#fff",
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: "#10b981",
+    borderWidth: 2,
+    borderColor: "#e5e7eb",
+    overflow: "hidden",
+    paddingVertical: 14,
+    paddingLeft: 10,
+    paddingRight: 14,
   },
-  graveyardTaskTitle: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  graveyardTaskTitle: { fontSize: 16, fontWeight: "600", color: "#1f2937" },
   graveyardMeta: { fontSize: 12, color: "#9ca3af", marginTop: 4 },
 
-  taskHeaderContent: { flex: 1, gap: 6 },
+  taskHeaderContent: { flex: 1, minWidth: 0, gap: 6 },
   taskTitle: { fontSize: 16, fontWeight: "600", color: "#1f2937" },
   taskTitleCompleting: { textDecorationLine: "line-through", color: "#6b7280" },
   taskMovingLabel: {
@@ -1771,28 +2441,180 @@ const styles = StyleSheet.create({
     borderBottomColor: "#9333ea",
   },
   taskTitleTouchable: { alignSelf: "stretch" },
-  taskMeta: { fontSize: 12, color: "#6b7280" },
+  taskMeta: { fontSize: 12, color: "#6b7280", marginTop: 2 },
 
-  completeButton: {
+  taskMetaRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 20,
+    minWidth: 0,
+  },
+  dueDateMetaItem: { flexShrink: 0 },
+  dueDatePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+  },
+  dueDatePillOverdue: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#dc2626",
+  },
+  dueDatePillText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  dueDatePillTextOverdue: { color: "#dc2626" },
+
+  dueDateModalCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  dueDateModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  dueDateModalTaskName: {
+    fontSize: 14,
+    color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  dueDateSection: {
+    width: "100%",
+    backgroundColor: "#f9fafb",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  dueDateInputLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 8,
+  },
+  dueDateInput: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontSize: 16,
+    color: "#1f2937",
+    marginBottom: 12,
+    backgroundColor: "#fff",
+  },
+  dueDateSetDateButton: {
+    width: "100%",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: "#9333ea",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dueDateSetDateButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  dueDateQuickLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 10,
+  },
+  dueDateChipsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  dueDateChip: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#e9d5ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dueDateChipText: { fontSize: 14, fontWeight: "600", color: "#9333ea" },
+  dueDateModalFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
+  },
+  dueDateFooterButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  dueDateClearText: { fontSize: 14, color: "#6b7280", fontWeight: "500" },
+  dueDateCancelText: { fontSize: 14, color: "#9333ea", fontWeight: "600" },
+
+  priorityChip: {
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+  },
+  priorityChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  markDonePill: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 8,
     backgroundColor: "#ede9fe",
-    justifyContent: "center",
-    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#e9d5ff",
   },
-  completeButtonDone: { backgroundColor: "transparent" },
-  completeButtonText: { fontSize: 13, fontWeight: "600", color: "#9333ea" },
+  markDonePillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#9333ea",
+  },
 
   editTasksFloating: { position: "absolute", bottom: 24, right: 20 },
   editTasksButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     backgroundColor: "#ede9fe",
+    borderWidth: 1.5,
+    borderColor: "#e9d5ff",
   },
   editTasksButtonActive: { backgroundColor: "#9333ea" },
   editTasksButtonText: { fontSize: 14, fontWeight: "600", color: "#9333ea" },
@@ -1823,31 +2645,28 @@ const styles = StyleSheet.create({
     maxHeight: "80%",
     backgroundColor: "#fff",
     borderRadius: 20,
-    padding: 28,
+    padding: 24,
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.12,
     shadowRadius: 24,
     elevation: 12,
   },
-  chooseTaskModalList: { maxHeight: 320 },
+  chooseTaskModalList: { maxHeight: 320, width: "100%" },
+  chooseTaskModalListContent: { paddingBottom: 8 },
   chooseTaskModalRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     paddingVertical: 14,
-    paddingHorizontal: 4,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#f3f4f6",
   },
-  chooseTaskModalNumber: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#6b7280",
-    minWidth: 24,
-  },
   chooseTaskRowTitle: {
     flex: 1,
+    minWidth: 0,
     fontSize: 15,
     fontWeight: "500",
     color: "#1f2937",
@@ -1951,14 +2770,9 @@ const styles = StyleSheet.create({
   },
   addSubtaskInput: {
     flex: 1,
-    borderTopWidth: 0,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderLeftColor: "#e5e7eb",
-    borderRightColor: "#e5e7eb",
-    borderBottomColor: "#e5e7eb",
-    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
     padding: 10,
     fontSize: 14,
     backgroundColor: "#f3f4f6",
