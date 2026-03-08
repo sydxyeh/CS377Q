@@ -1,5 +1,5 @@
 /**
- * AI service to split a task into 2-5 concrete subtasks.
+ * AI service to split a task into 3-5 clear, useful subtasks (meaningful phases).
  * Uses Anthropic API. Set EXPO_PUBLIC_ANTHROPIC_API_KEY in .env.
  */
 
@@ -20,7 +20,8 @@ export function isSplitTaskAvailable(): boolean {
 }
 
 /**
- * Generate 2-5 subtask labels as micro steps to help someone with ADHD get started and avoid getting stuck.
+ * Generate 3-5 subtask labels as clear, useful phases (not overly granular).
+ * Each step can group related actions so the list is actionable without being overwhelming.
  * @param taskTitle - The main task title
  * @param exclude - Optional list of suggestion texts to avoid; the model will be asked to suggest different ones
  */
@@ -50,12 +51,12 @@ export async function generateSubtasks(taskTitle: string, exclude?: string[]): P
         model: 'claude-opus-4-6',
         max_tokens: 500,
         system:
-          'You break down tasks into 2-5 micro steps for someone with ADHD. Each step should be tiny and concrete so they can get started without overwhelm and not get stuck. The first step should be the smallest possible (e.g. "Open the doc" or "Get out one ingredient") to lower the barrier to start. Avoid vague or big steps. Reply with only a JSON array of strings, one per micro step. No numbering, no explanation. Example: ["Open the file", "Write one sentence", "Save"].' +
+          'You break down a task into 3-5 clear, useful subtasks. Each subtask should be a meaningful phase—concrete enough to act on, but not overly granular. It is fine to combine related actions into one step (e.g. "Grab clothes from dryer, fold clothes and put back into the closet"). Avoid both tiny micro-steps and vague or huge steps. The result should help someone see the main stages of the task and get it done without overwhelm. Reply with only a JSON array of strings, one per subtask. No numbering, no explanation. Good example for "Do the laundry": ["Load dirty clothes into washer", "Move clothes into dryer", "Grab clothes from dryer, fold clothes and put back into the closet"].' +
           excludeInstruction,
         messages: [
           {
             role: 'user',
-            content: `Break "${taskTitle}" into 2-5 micro steps that help someone get started and keep momentum (ADHD-friendly, tiny first step):`,
+            content: `Break "${taskTitle}" into 3-5 clear, useful subtasks (meaningful phases, not micro-steps). Each step can group related actions. Output only a JSON array of strings:`,
           },
         ],
       }),

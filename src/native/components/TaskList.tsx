@@ -1807,7 +1807,9 @@ export default function TaskList({
                   }
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.dueDateChipText}>Today</Text>
+                  <Text style={styles.dueDateChipText} numberOfLines={1}>
+                    Today
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.dueDateChip}
@@ -1820,7 +1822,9 @@ export default function TaskList({
                   }
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.dueDateChipText}>Tomorrow</Text>
+                  <Text style={styles.dueDateChipText} numberOfLines={1}>
+                    Tomorrow
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.dueDateChip}
@@ -1833,7 +1837,9 @@ export default function TaskList({
                   }
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.dueDateChipText}>Next week</Text>
+                  <Text style={styles.dueDateChipText} numberOfLines={1}>
+                    Next week
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2548,11 +2554,12 @@ const styles = StyleSheet.create({
   dueDateChipsRow: {
     flexDirection: "row",
     gap: 8,
+    flexWrap: "wrap",
   },
   dueDateChip: {
-    flex: 1,
+    flexShrink: 0,
     paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderRadius: 12,
     backgroundColor: "#fff",
     borderWidth: 1.5,
@@ -2560,7 +2567,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  dueDateChipText: { fontSize: 14, fontWeight: "600", color: "#9333ea" },
+  dueDateChipText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#9333ea",
+  },
   dueDateModalFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
