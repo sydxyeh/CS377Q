@@ -1632,7 +1632,7 @@ export default function TaskList({
                 <CuteAvatar mood="excited" size="sm" />
                 <View style={styles.completedBannerBubble}>
                   <Text style={styles.completedBannerText}>
-                    wow! great job completing{" "}
+                    Wow! Great job completing{" "}
                     {finishedTasks.length === 1
                       ? "1 task"
                       : `${finishedTasks.length} tasks`}{" "}
