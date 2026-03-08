@@ -30,7 +30,17 @@ import type {
   FinishedTask,
   Subtask,
 } from "../../../App.native";
-import { format, addDays, parseISO, startOfDay, isBefore, isToday, parse, isValid, differenceInDays } from "date-fns";
+import {
+  format,
+  addDays,
+  parseISO,
+  startOfDay,
+  isBefore,
+  isToday,
+  parse,
+  isValid,
+  differenceInDays,
+} from "date-fns";
 import {
   generateSubtasks,
   isSplitTaskAvailable,
@@ -626,9 +636,7 @@ export default function TaskList({
     }
   };
 
-  const getPriorityChipTextColor = (
-    p: "high" | "medium" | "low",
-  ): string => {
+  const getPriorityChipTextColor = (p: "high" | "medium" | "low"): string => {
     return "#fff";
   };
 
@@ -918,9 +926,9 @@ export default function TaskList({
                           style={[
                             styles.dueDatePillText,
                             {
-                              color: getPriorityChipInactiveStyle(
-                                displayPriority,
-                              ).color,
+                              color:
+                                getPriorityChipInactiveStyle(displayPriority)
+                                  .color,
                             },
                           ]}
                         >
@@ -1238,14 +1246,14 @@ export default function TaskList({
             isCompleted && styles.taskCardCompleted,
             isActive && styles.taskCardActive,
             !isExpanded &&
-              !isCompleted &&
-              getPriorityTabStyle(displayPriority, false).backgroundColor
+            !isCompleted &&
+            getPriorityTabStyle(displayPriority, false).backgroundColor
               ? {
-                  backgroundColor:
-                    getPriorityTabStyle(displayPriority, false).backgroundColor,
+                  backgroundColor: getPriorityTabStyle(displayPriority, false)
+                    .backgroundColor,
                   borderLeftWidth: 4,
-                  borderLeftColor:
-                    getPriorityTabStyle(displayPriority, false).borderLeftColor,
+                  borderLeftColor: getPriorityTabStyle(displayPriority, false)
+                    .borderLeftColor,
                 }
               : {},
           ]}
@@ -1406,11 +1414,7 @@ export default function TaskList({
                       {recommended.reason}
                     </Text>
                   </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color="#9333ea"
-                  />
+                  <Ionicons name="chevron-forward" size={20} color="#9333ea" />
                 </TouchableOpacity>
               ) : null;
             })()}
@@ -1435,7 +1439,9 @@ export default function TaskList({
                 activeOpacity={0.85}
               >
                 <Ionicons name="flag" size={16} color="#9333ea" />
-                <Text style={styles.sortFilterButtonText}>Sort by priority</Text>
+                <Text style={styles.sortFilterButtonText}>
+                  Sort by priority
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.sortFilterButton}
@@ -1476,48 +1482,48 @@ export default function TaskList({
           </>
         )
       ) : (
-          <ScrollView
-            style={styles.graveyardScroll}
-            contentContainerStyle={[
-              styles.graveyardScrollContent,
-              finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
-            ]}
-          >
-            {finishedTasks.length > 0 && (
-              <View style={styles.completedBanner}>
-                <CuteAvatar mood="excited" size="sm" />
-                <View style={styles.completedBannerBubble}>
-                  <Text style={styles.completedBannerText}>
-                    wow! great job completing{" "}
-                    {finishedTasks.length === 1
-                      ? "1 task"
-                      : `${finishedTasks.length} tasks`}{" "}
-                    :)
-                  </Text>
-                </View>
-              </View>
-            )}
-            {finishedTasks.length === 0 ? (
-              <View style={styles.graveyardEmpty}>
-                <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
-                <Text style={styles.graveyardEmptyTitle}>
-                  No completed tasks yet
-                </Text>
-                <Text style={styles.graveyardEmptyText}>
-                  Complete a task to see it here.
+        <ScrollView
+          style={styles.graveyardScroll}
+          contentContainerStyle={[
+            styles.graveyardScrollContent,
+            finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
+          ]}
+        >
+          {finishedTasks.length > 0 && (
+            <View style={styles.completedBanner}>
+              <CuteAvatar mood="excited" size="sm" />
+              <View style={styles.completedBannerBubble}>
+                <Text style={styles.completedBannerText}>
+                  Wow! Great job completing{" "}
+                  {finishedTasks.length === 1
+                    ? "1 task"
+                    : `${finishedTasks.length} tasks`}{" "}
+                  :)
                 </Text>
               </View>
-            ) : (
-              finishedTasks.map((ft) => (
-                <View key={ft.id} style={styles.graveyardCard}>
-                  <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
-                  <Text style={styles.graveyardMeta}>
-                    Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
-                  </Text>
-                </View>
-              ))
-            )}
-          </ScrollView>
+            </View>
+          )}
+          {finishedTasks.length === 0 ? (
+            <View style={styles.graveyardEmpty}>
+              <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
+              <Text style={styles.graveyardEmptyTitle}>
+                No completed tasks yet
+              </Text>
+              <Text style={styles.graveyardEmptyText}>
+                Complete a task to see it here.
+              </Text>
+            </View>
+          ) : (
+            finishedTasks.map((ft) => (
+              <View key={ft.id} style={styles.graveyardCard}>
+                <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
+                <Text style={styles.graveyardMeta}>
+                  Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
+                </Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
       )}
 
       {activeSubTab === "current" && tasks.length > 0 && (
@@ -1568,10 +1574,7 @@ export default function TaskList({
                   }}
                   activeOpacity={0.85}
                 >
-                  <Text
-                    style={styles.chooseTaskRowTitle}
-                    numberOfLines={2}
-                  >
+                  <Text style={styles.chooseTaskRowTitle} numberOfLines={2}>
                     {index + 1}. {t.title}
                   </Text>
                   <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
