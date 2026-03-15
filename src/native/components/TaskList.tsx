@@ -1908,7 +1908,7 @@ export default function TaskList({
                             ? "I'm listening... tell me how to edit subtasks. 💜"
                             : voiceReRecordingRef.current
                               ? `Tap the mic to record your changes again for "${voiceTask?.title}".`
-                              : `Tell me how to edit or add subtasks for "${voiceTask?.title}". Tap the mic when you're ready.`}
+                              : `Tell me how to edit or add subtasks for "${voiceTask?.title}"!`}
                     </Text>
                   </View>
                 </View>
