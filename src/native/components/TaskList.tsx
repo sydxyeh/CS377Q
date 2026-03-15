@@ -91,6 +91,10 @@ export default function TaskList({
   const [newSubtaskText, setNewSubtaskText] = useState<Record<string, string>>(
     {},
   );
+  const [subtaskInputMode, setSubtaskInputMode] = useState<"voice" | "text">(
+    "voice",
+  );
+  const [subtaskTextInput, setSubtaskTextInput] = useState("");
   const [activeSubTab, setActiveSubTab] = useState<TasksSubTab>("current");
   const [splittingTaskId, setSplittingTaskId] = useState<string | null>(null);
   const [editingSubtask, setEditingSubtask] = useState<{
@@ -122,9 +126,9 @@ export default function TaskList({
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceReRecordingRef = useRef(false);
   const voiceTranscriptionQueueRef = useRef<string[]>([]);
-  const voiceRecordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
+  const voiceRecordingIntervalRef = useRef<ReturnType<
+    typeof setInterval
+  > | null>(null);
   const voiceChunkTranscribingRef = useRef(false);
   const voiceLiveTranscriptRef = useRef("");
   const refillInProgressRef = useRef(false);
@@ -597,10 +601,7 @@ export default function TaskList({
       voiceRecordingRef.current = recording;
       setVoiceRecording(true);
       voiceRecordingIntervalRef.current = setInterval(async () => {
-        if (
-          voiceRecordingRef.current &&
-          !voiceChunkTranscribingRef.current
-        ) {
+        if (voiceRecordingRef.current && !voiceChunkTranscribingRef.current) {
           try {
             const uri = await stopRecording(voiceRecordingRef.current);
             voiceTranscriptionQueueRef.current.push(uri);
@@ -1557,7 +1558,9 @@ export default function TaskList({
                 activeOpacity={0.85}
               >
                 <Ionicons name="flag" size={16} color="#9333ea" />
-                <Text style={styles.sortFilterButtonText}>Sort by priority</Text>
+                <Text style={styles.sortFilterButtonText}>
+                  Sort by priority
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1620,48 +1623,48 @@ export default function TaskList({
           </>
         )
       ) : (
-          <ScrollView
-            style={styles.graveyardScroll}
-            contentContainerStyle={[
-              styles.graveyardScrollContent,
-              finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
-            ]}
-          >
-            {finishedTasks.length > 0 && (
-              <View style={styles.completedBanner}>
-                <CuteAvatar mood="excited" size="sm" />
-                <View style={styles.completedBannerBubble}>
-                  <Text style={styles.completedBannerText}>
-                    Wow! Great job completing{" "}
-                    {finishedTasks.length === 1
-                      ? "1 task"
-                      : `${finishedTasks.length} tasks`}{" "}
-                    :)
-                  </Text>
-                </View>
-              </View>
-            )}
-            {finishedTasks.length === 0 ? (
-              <View style={styles.graveyardEmpty}>
-                <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
-                <Text style={styles.graveyardEmptyTitle}>
-                  No completed tasks yet
-                </Text>
-                <Text style={styles.graveyardEmptyText}>
-                  Complete a task to see it here.
+        <ScrollView
+          style={styles.graveyardScroll}
+          contentContainerStyle={[
+            styles.graveyardScrollContent,
+            finishedTasks.length === 0 && styles.graveyardScrollContentEmpty,
+          ]}
+        >
+          {finishedTasks.length > 0 && (
+            <View style={styles.completedBanner}>
+              <CuteAvatar mood="excited" size="sm" />
+              <View style={styles.completedBannerBubble}>
+                <Text style={styles.completedBannerText}>
+                  Wow! Great job completing{" "}
+                  {finishedTasks.length === 1
+                    ? "1 task"
+                    : `${finishedTasks.length} tasks`}{" "}
+                  :)
                 </Text>
               </View>
-            ) : (
-              finishedTasks.map((ft) => (
-                <View key={ft.id} style={styles.graveyardCard}>
-                  <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
-                  <Text style={styles.graveyardMeta}>
-                    Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
-                  </Text>
-                </View>
-              ))
-            )}
-          </ScrollView>
+            </View>
+          )}
+          {finishedTasks.length === 0 ? (
+            <View style={styles.graveyardEmpty}>
+              <Text style={styles.graveyardEmptyEmoji}>🎉</Text>
+              <Text style={styles.graveyardEmptyTitle}>
+                No completed tasks yet
+              </Text>
+              <Text style={styles.graveyardEmptyText}>
+                Complete a task to see it here.
+              </Text>
+            </View>
+          ) : (
+            finishedTasks.map((ft) => (
+              <View key={ft.id} style={styles.graveyardCard}>
+                <Text style={styles.graveyardTaskTitle}>{ft.title}</Text>
+                <Text style={styles.graveyardMeta}>
+                  Completed {format(new Date(ft.completedAt), "MMM d, yyyy")}
+                </Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
       )}
 
       {activeSubTab === "current" && tasks.length > 0 && (
@@ -1670,7 +1673,8 @@ export default function TaskList({
           onPress={openSubtaskHelperFloating}
           activeOpacity={0.85}
         >
-          <Ionicons name="mic" size={22} color="#fff" />
+          <Ionicons name="sparkles" size={22} color="#fff" />
+
           <Text style={styles.subtaskHelperFloatingText}>Subtasks helper</Text>
         </TouchableOpacity>
       )}
@@ -1740,7 +1744,11 @@ export default function TaskList({
             setPendingVoiceEdits(null);
             voiceReRecordingRef.current = false;
             setVoiceTask(null);
-          } else if (!voiceRecording && !voiceTranscribing && !voiceProcessing) {
+          } else if (
+            !voiceRecording &&
+            !voiceTranscribing &&
+            !voiceProcessing
+          ) {
             voiceReRecordingRef.current = false;
             setVoiceTask(null);
           }
@@ -1754,7 +1762,11 @@ export default function TaskList({
               setPendingVoiceEdits(null);
               voiceReRecordingRef.current = false;
               setVoiceTask(null);
-            } else if (!voiceRecording && !voiceTranscribing && !voiceProcessing) {
+            } else if (
+              !voiceRecording &&
+              !voiceTranscribing &&
+              !voiceProcessing
+            ) {
               voiceReRecordingRef.current = false;
               setVoiceTask(null);
             }
@@ -1803,25 +1815,23 @@ export default function TaskList({
                   showsVerticalScrollIndicator={false}
                 >
                   <View style={styles.voiceConfirmSection}>
-                    <Text style={styles.voiceConfirmSectionLabel}>
-                      Before
-                    </Text>
+                    <Text style={styles.voiceConfirmSectionLabel}>Before</Text>
                     <View style={styles.voiceConfirmList}>
-                      {pendingVoiceEdits.before.length
-                        ? pendingVoiceEdits.before.map((t, i) => (
-                            <Text
-                              key={i}
-                              style={styles.voiceConfirmListItem}
-                              numberOfLines={2}
-                            >
-                              {i + 1}. {t}
-                            </Text>
-                          ))
-                        : (
-                            <Text style={styles.voiceConfirmListEmpty}>
-                              No subtasks
-                            </Text>
-                          )}
+                      {pendingVoiceEdits.before.length ? (
+                        pendingVoiceEdits.before.map((t, i) => (
+                          <Text
+                            key={i}
+                            style={styles.voiceConfirmListItem}
+                            numberOfLines={2}
+                          >
+                            {i + 1}. {t}
+                          </Text>
+                        ))
+                      ) : (
+                        <Text style={styles.voiceConfirmListEmpty}>
+                          No subtasks
+                        </Text>
+                      )}
                     </View>
                   </View>
                   <View style={styles.voiceConfirmSection}>
@@ -1887,6 +1897,7 @@ export default function TaskList({
                     }
                     size="md"
                   />
+
                   <View style={styles.voiceModalMessageBox}>
                     <Text style={styles.voiceModalMessageText}>
                       {voiceProcessing
@@ -1902,49 +1913,139 @@ export default function TaskList({
                   </View>
                 </View>
 
+                <View style={styles.subtaskInputTabs}>
+                  <TouchableOpacity
+                    style={[
+                      styles.subtaskInputTab,
+                      subtaskInputMode === "voice" &&
+                        styles.subtaskInputTabActive,
+                    ]}
+                    onPress={() => setSubtaskInputMode("voice")}
+                  >
+                    <Ionicons
+                      name="mic"
+                      size={18}
+                      color={subtaskInputMode === "voice" ? "#fff" : "#6b7280"}
+                    />
+                    <Text
+                      style={[
+                        styles.subtaskInputTabText,
+                        subtaskInputMode === "voice" &&
+                          styles.subtaskInputTabTextActive,
+                      ]}
+                    >
+                      Voice
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.subtaskInputTab,
+                      subtaskInputMode === "text" &&
+                        styles.subtaskInputTabActive,
+                    ]}
+                    onPress={() => setSubtaskInputMode("text")}
+                  >
+                    <Ionicons
+                      name="create"
+                      size={18}
+                      color={subtaskInputMode === "text" ? "#fff" : "#6b7280"}
+                    />
+                    <Text
+                      style={[
+                        styles.subtaskInputTabText,
+                        subtaskInputMode === "text" &&
+                          styles.subtaskInputTabTextActive,
+                      ]}
+                    >
+                      Text
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {voiceError ? (
                   <View style={styles.voiceModalErrorWrap}>
-                    <Ionicons
-                      name="alert-circle"
-                      size={18}
-                      color="#dc2626"
-                    />
+                    <Ionicons name="alert-circle" size={18} color="#dc2626" />
                     <Text style={styles.voiceErrorText}>{voiceError}</Text>
                   </View>
                 ) : null}
-
-                <View
-                  style={[
-                    styles.voiceModalVoiceCard,
-                    voiceRecording && styles.voiceModalVoiceCardRecording,
-                  ]}
-                >
-                  <TouchableOpacity
+                {subtaskInputMode === "voice" && (
+                  <View
                     style={[
-                      styles.voiceModalRecordButton,
-                      voiceRecording && styles.voiceModalRecordButtonActive,
+                      styles.voiceModalVoiceCard,
+                      voiceRecording && styles.voiceModalVoiceCardRecording,
                     ]}
-                    onPress={
-                      voiceRecording
-                        ? stopVoiceRecording
-                        : startVoiceRecording
-                    }
-                    disabled={voiceTranscribing || voiceProcessing}
-                    activeOpacity={0.9}
                   >
-                    <Ionicons
-                      name={voiceRecording ? "mic-off" : "mic"}
-                      size={48}
-                      color="#fff"
-                    />
-                  </TouchableOpacity>
-                  <Text style={styles.voiceModalRecordLabel}>
-                    {voiceRecording
-                      ? "Tap to stop"
-                      : "Tap to record"}
-                  </Text>
-                </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.voiceModalRecordButton,
+                        voiceRecording && styles.voiceModalRecordButtonActive,
+                      ]}
+                      onPress={
+                        voiceRecording
+                          ? stopVoiceRecording
+                          : startVoiceRecording
+                      }
+                      disabled={voiceTranscribing || voiceProcessing}
+                      activeOpacity={0.9}
+                    >
+                      <Ionicons
+                        name={voiceRecording ? "mic-off" : "mic"}
+                        size={48}
+                        color="#fff"
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.voiceModalRecordLabel}>
+                      {voiceRecording ? "Tap to stop" : "Tap to record"}
+                    </Text>
+                  </View>
+                )}
 
+                {subtaskInputMode === "text" && (
+                  <View style={styles.subtaskTextCard}>
+                    <TextInput
+                      style={styles.subtaskTextInput}
+                      placeholder={`Describe subtasks for "${voiceTask?.title}"`}
+                      multiline
+                      value={subtaskTextInput}
+                      onChangeText={setSubtaskTextInput}
+                    />
+
+                    <TouchableOpacity
+                      style={[
+                        styles.subtaskGenerateButton,
+                        !subtaskTextInput.trim() && { opacity: 0.5 },
+                      ]}
+                      disabled={!subtaskTextInput.trim()}
+                      onPress={async () => {
+                        if (!voiceTask || !subtaskTextInput.trim()) return;
+                        const currentTexts = voiceTask.subtasks.map(
+                          (s) => s.text,
+                        );
+                        try {
+                          const newTexts = await transcriptToSubtaskEdits(
+                            voiceTask.title,
+                            currentTexts,
+                            subtaskTextInput.trim(),
+                          );
+                          setPendingVoiceEdits({
+                            task: voiceTask,
+                            before: currentTexts,
+                            after: newTexts,
+                          });
+                          setSubtaskTextInput("");
+                        } catch (err) {
+                          // eh
+                        }
+                      }}
+                    >
+                      <Ionicons name="sparkles" size={18} color="#fff" />
+                      <Text style={styles.subtaskGenerateButtonText}>
+                        Generate subtasks
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
                 {voiceRecording && voiceLiveTranscript.trim() ? (
                   <View style={styles.voiceLiveTranscript}>
                     <Text style={styles.voiceLiveTranscriptText}>
@@ -2419,12 +2520,78 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
   },
+  subtaskInputTabs: {
+    flexDirection: "row",
+    backgroundColor: "#f3f4f6",
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 16,
+  },
+
+  subtaskInputTab: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+
+  subtaskInputTabActive: {
+    backgroundColor: "#9333ea",
+  },
+
+  subtaskInputTabText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+
+  subtaskInputTabTextActive: {
+    color: "#fff",
+  },
+
+  subtaskTextCard: {
+    gap: 12,
+    marginTop: 12,
+  },
+
+  subtaskTextInput: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 12,
+    padding: 12,
+    minHeight: 80,
+    fontSize: 14,
+    backgroundColor: "#f9fafb",
+  },
+
+  subtaskGenerateButton: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "#9333ea",
+  },
+
+  subtaskGenerateButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#fff",
+  },
   voiceConfirmListItem: {
     fontSize: 13,
     color: "#374151",
     marginBottom: 4,
   },
-  voiceConfirmListEmpty: { fontSize: 13, color: "#9ca3af", fontStyle: "italic" },
+  voiceConfirmListEmpty: {
+    fontSize: 13,
+    color: "#9ca3af",
+    fontStyle: "italic",
+  },
   voiceConfirmActions: {
     flexDirection: "row",
     gap: 12,

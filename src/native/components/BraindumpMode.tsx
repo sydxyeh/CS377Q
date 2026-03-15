@@ -1,9 +1,19 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
-import { useNavigation } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
+import { useNavigation } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,9 +22,9 @@ import Animated, {
   withTiming,
   withDelay,
   Easing,
-} from 'react-native-reanimated';
-import type { Task, GameState } from '../../../App.native';
-import CuteAvatar from './CuteAvatar';
+} from "react-native-reanimated";
+import type { Task, GameState } from "../../../App.native";
+import CuteAvatar from "./CuteAvatar";
 
 type NavigationProp = BottomTabNavigationProp<{
   Braindump: undefined;
@@ -24,29 +34,44 @@ import {
   requestMicrophonePermission,
   startRecording,
   stopRecording,
-} from '../services/audioRecording';
-import { transcribeAudio, isTranscriptionAvailable } from '../services/transcription';
-import { transcriptToTaskTitlesWithDueDates } from '../services/splitTask';
-import { speakAvatarMessageIfSet, stopAvatarSpeech } from '../services/avatarSpeech';
-import { format, parseISO } from 'date-fns';
+} from "../services/audioRecording";
+import {
+  transcribeAudio,
+  isTranscriptionAvailable,
+} from "../services/transcription";
+import { transcriptToTaskTitlesWithDueDates } from "../services/splitTask";
+import {
+  speakAvatarMessageIfSet,
+  stopAvatarSpeech,
+} from "../services/avatarSpeech";
+import { format, parseISO } from "date-fns";
 
 interface BraindumpModeProps {
   onTasksCreated: (tasks: Task[]) => void;
   gameState: GameState;
 }
 
-export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpModeProps) {
+export default function BraindumpMode({
+  onTasksCreated,
+  gameState,
+}: BraindumpModeProps) {
   const navigation = useNavigation<NavigationProp>();
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState('');
+  const [textInput, setTextInput] = useState("");
+  const [activeInputMode, setActiveInputMode] = useState<"voice" | "text">(
+    "voice",
+  );
+  const [transcript, setTranscript] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isApiConfigured, setIsApiConfigured] = useState<boolean>(true);
   const [reviewTasksVisible, setReviewTasksVisible] = useState(false);
-  const [pendingTasks, setPendingTasks] = useState<{ title: string; include: boolean; dueDate?: string }[]>([]);
-  const [manualTaskTitle, setManualTaskTitle] = useState('');
+  const [pendingTasks, setPendingTasks] = useState<
+    { title: string; include: boolean; dueDate?: string }[]
+  >([]);
+  const [manualTaskTitle, setManualTaskTitle] = useState("");
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
@@ -58,7 +83,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 
   // Animation values for pulsing mic button
   const micButtonScale = useSharedValue(1);
-  
+
   // Animation values for ripple waves
   const ripple1Scale = useSharedValue(0);
   const ripple1Opacity = useSharedValue(0.4);
@@ -77,10 +102,16 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     if (isRecording) {
       micButtonScale.value = withRepeat(
         withSequence(
-          withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1.0, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+          withTiming(1.05, {
+            duration: 1000,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          withTiming(1.0, {
+            duration: 1000,
+            easing: Easing.inOut(Easing.ease),
+          }),
         ),
-        -1
+        -1,
       );
     } else {
       micButtonScale.value = withTiming(1.0, { duration: 300 });
@@ -93,16 +124,22 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       const animateDots = () => {
         dot1Opacity.value = withSequence(
           withTiming(1, { duration: 400 }),
-          withTiming(0.3, { duration: 400 })
+          withTiming(0.3, { duration: 400 }),
         );
-        dot2Opacity.value = withDelay(200, withSequence(
-          withTiming(1, { duration: 400 }),
-          withTiming(0.3, { duration: 400 })
-        ));
-        dot3Opacity.value = withDelay(400, withSequence(
-          withTiming(1, { duration: 400 }),
-          withTiming(0.3, { duration: 400 })
-        ));
+        dot2Opacity.value = withDelay(
+          200,
+          withSequence(
+            withTiming(1, { duration: 400 }),
+            withTiming(0.3, { duration: 400 }),
+          ),
+        );
+        dot3Opacity.value = withDelay(
+          400,
+          withSequence(
+            withTiming(1, { duration: 400 }),
+            withTiming(0.3, { duration: 400 }),
+          ),
+        );
       };
 
       // Start animation loop
@@ -121,7 +158,10 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   useEffect(() => {
     if (isRecording) {
       // Function to start a ripple animation
-      const startRipple = (scale: typeof ripple1Scale, opacity: typeof ripple1Opacity) => {
+      const startRipple = (
+        scale: typeof ripple1Scale,
+        opacity: typeof ripple1Opacity,
+      ) => {
         scale.value = 0;
         opacity.value = 0.4;
         scale.value = withTiming(2.5, {
@@ -133,7 +173,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 
       // Start first ripple immediately
       startRipple(ripple1Scale, ripple1Opacity);
-      
+
       // Start ripple 2 after delay
       const timeout2 = setTimeout(() => {
         startRipple(ripple2Scale, ripple2Opacity);
@@ -203,13 +243,16 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     (async () => {
       const permission = await requestMicrophonePermission();
       setHasPermission(permission);
-      if (!permission) setError('Microphone permission is required for voice input.');
+      if (!permission)
+        setError("Microphone permission is required for voice input.");
     })();
 
     const apiConfigured = isTranscriptionAvailable();
     setIsApiConfigured(apiConfigured);
     if (!apiConfigured) {
-      setError('Google Cloud API key is not configured. Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.');
+      setError(
+        "Google Cloud API key is not configured. Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.",
+      );
     }
   }, []);
 
@@ -218,12 +261,14 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
       }
-      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+      if (recordingIntervalRef.current)
+        clearInterval(recordingIntervalRef.current);
     };
   }, []);
 
   const processTranscriptionQueue = useCallback(async () => {
-    if (isTranscribingRef.current || transcriptionQueueRef.current.length === 0) return;
+    if (isTranscribingRef.current || transcriptionQueueRef.current.length === 0)
+      return;
 
     isTranscribingRef.current = true;
     setIsTranscribing(true);
@@ -235,14 +280,20 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       try {
         const transcribedText = await transcribeAudio(uri);
         if (transcribedText.trim()) {
-          setTranscript(prev => {
-            const newText = prev ? `${prev} ${transcribedText}` : transcribedText;
+          setTranscript((prev) => {
+            const newText = prev
+              ? `${prev} ${transcribedText}`
+              : transcribedText;
             return newText.trim();
           });
         }
       } catch (err) {
-        console.error('Transcription error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to transcribe audio. Please try again.');
+        console.error("Transcription error:", err);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to transcribe audio. Please try again.",
+        );
       }
     }
 
@@ -253,24 +304,24 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const handleStartRecording = async () => {
     if (hasPermission === false) {
       Alert.alert(
-        'Permission Required',
-        'Microphone permission is required for voice input. Please enable it in your device settings.',
-        [{ text: 'OK' }]
+        "Permission Required",
+        "Microphone permission is required for voice input. Please enable it in your device settings.",
+        [{ text: "OK" }],
       );
       return;
     }
 
     if (!isApiConfigured) {
       Alert.alert(
-        'API Key Required',
-        'Google Cloud API key is not configured. Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.',
-        [{ text: 'OK' }]
+        "API Key Required",
+        "Google Cloud API key is not configured. Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.",
+        [{ text: "OK" }],
       );
       return;
     }
 
     setError(null);
-    setTranscript('');
+    setTranscript("");
     transcriptionQueueRef.current = [];
 
     try {
@@ -290,13 +341,17 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 
             if (!isTranscribingRef.current) processTranscriptionQueue();
           } catch (err) {
-            console.error('Error in recording interval:', err);
+            console.error("Error in recording interval:", err);
           }
         }
       }, 4000);
     } catch (err) {
-      console.error('Error starting recording:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start recording. Please try again.');
+      console.error("Error starting recording:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to start recording. Please try again.",
+      );
       setIsRecording(false);
     }
   };
@@ -322,13 +377,15 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
         try {
           const finalTranscript = await transcribeAudio(finalUri);
           if (finalTranscript.trim()) {
-            setTranscript(prev => {
-              const newText = prev ? `${prev} ${finalTranscript}` : finalTranscript;
+            setTranscript((prev) => {
+              const newText = prev
+                ? `${prev} ${finalTranscript}`
+                : finalTranscript;
               return newText.trim();
             });
           }
         } catch (err) {
-          console.error('Final transcription error:', err);
+          console.error("Final transcription error:", err);
         } finally {
           setIsTranscribing(false);
         }
@@ -336,7 +393,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 
       await processTranscriptionQueue();
     } catch (err) {
-      console.error('Error stopping recording:', err);
+      console.error("Error stopping recording:", err);
       if (err instanceof Error) setError(err.message);
       setIsRecording(false);
     }
@@ -360,7 +417,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       if (withDue.length > 0) {
         setPendingTasks(
           withDue.map((item) => ({
-            title: item.title.trim() || 'Untitled task',
+            title: item.title.trim() || "Untitled task",
             include: true,
             dueDate: item.dueDate,
           })),
@@ -368,14 +425,20 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
       } else {
         const list = fallbackParseTitles(text);
         setPendingTasks(
-          list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })),
+          list.map((title) => ({
+            title: title.trim() || "Untitled task",
+            include: true,
+          })),
         );
       }
       setReviewTasksVisible(true);
     } catch (_) {
       const list = fallbackParseTitles(text);
       setPendingTasks(
-        list.map((title) => ({ title: title.trim() || 'Untitled task', include: true })),
+        list.map((title) => ({
+          title: title.trim() || "Untitled task",
+          include: true,
+        })),
       );
       setReviewTasksVisible(true);
     } finally {
@@ -386,13 +449,13 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 
   const updatePendingTaskTitle = (index: number, title: string) => {
     setPendingTasks((prev) =>
-      prev.map((p, i) => (i === index ? { ...p, title } : p))
+      prev.map((p, i) => (i === index ? { ...p, title } : p)),
     );
   };
 
   const togglePendingTaskInclude = (index: number) => {
     setPendingTasks((prev) =>
-      prev.map((p, i) => (i === index ? { ...p, include: !p.include } : p))
+      prev.map((p, i) => (i === index ? { ...p, include: !p.include } : p)),
     );
   };
 
@@ -403,7 +466,10 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   const confirmAddTasks = () => {
     const toAdd = pendingTasks.filter((p) => p.include && p.title.trim());
     if (toAdd.length === 0) {
-      Alert.alert('No tasks selected', 'Select at least one task or edit the titles.');
+      Alert.alert(
+        "No tasks selected",
+        "Select at least one task or edit the titles.",
+      );
       return;
     }
     const tasks: Task[] = toAdd.map((p, i) => ({
@@ -416,29 +482,28 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
     onTasksCreated(tasks);
     setReviewTasksVisible(false);
     setPendingTasks([]);
-    setTranscript('');
-    navigation.navigate('Tasks');
+    setTranscript("");
+    navigation.navigate("Tasks");
   };
 
   const cancelReview = () => {
     setReviewTasksVisible(false);
     setPendingTasks([]);
-    setManualTaskTitle('');
+    setManualTaskTitle("");
   };
 
   const addManualTask = () => {
     const title = manualTaskTitle.trim();
     if (!title) return;
     setPendingTasks((prev) => [...prev, { title, include: true }]);
-    setManualTaskTitle('');
+    setManualTaskTitle("");
   };
 
-
   const getAvatarMood = () => {
-    if (isProcessing) return 'excited';
-    if (isRecording) return 'happy';
-    if (transcript) return 'proud';
-    return 'neutral';
+    if (isProcessing) return "excited";
+    if (isRecording) return "happy";
+    if (transcript) return "proud";
+    return "neutral";
   };
 
   const getAvatarMessage = () => {
@@ -458,140 +523,246 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
   }, [isProcessing, isRecording, transcript]);
 
   useEffect(() => {
-    return () => { stopAvatarSpeech(); };
+    return () => {
+      stopAvatarSpeech();
+    };
   }, []);
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-      <View style={styles.avatarCard}>
-        <CuteAvatar mood={getAvatarMood()} size="md" />
-        <View style={styles.messageBox}>
-          <Text style={styles.messageText}>{getAvatarMessage()}</Text>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+      >
+        <View style={styles.avatarCard}>
+          <CuteAvatar mood={getAvatarMood()} size="md" />
+          <View style={styles.messageBox}>
+            <Text style={styles.messageText}>{getAvatarMessage()}</Text>
+          </View>
         </View>
-      </View>
 
-      {!!error && (
-        <View style={styles.errorCard}>
-          <View style={styles.errorContent}>
-            <Ionicons name="alert-circle" size={20} color="#ef4444" />
-            <View style={styles.errorTextContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity onPress={() => setError(null)}>
-                <Text style={styles.errorDismiss}>Dismiss</Text>
+        <View style={styles.inputModeTabs}>
+          <TouchableOpacity
+            style={[
+              styles.inputTab,
+              activeInputMode === "voice" && styles.inputTabActive,
+            ]}
+            onPress={() => setActiveInputMode("voice")}
+          >
+            <Ionicons
+              name="mic"
+              size={18}
+              color={activeInputMode === "voice" ? "#fff" : "#6b7280"}
+            />
+            <Text
+              style={[
+                styles.inputTabText,
+                activeInputMode === "voice" && styles.inputTabTextActive,
+              ]}
+            >
+              Voice
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.inputTab,
+              activeInputMode === "text" && styles.inputTabActive,
+            ]}
+            onPress={() => setActiveInputMode("text")}
+          >
+            <Ionicons
+              name="create"
+              size={18}
+              color={activeInputMode === "text" ? "#fff" : "#6b7280"}
+            />
+            <Text
+              style={[
+                styles.inputTabText,
+                activeInputMode === "text" && styles.inputTabTextActive,
+              ]}
+            >
+              Text
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {!!error && (
+          <View style={styles.errorCard}>
+            <View style={styles.errorContent}>
+              <Ionicons name="alert-circle" size={20} color="#ef4444" />
+              <View style={styles.errorTextContainer}>
+                <Text style={styles.errorText}>{error}</Text>
+                <TouchableOpacity onPress={() => setError(null)}>
+                  <Text style={styles.errorDismiss}>Dismiss</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {hasPermission === false && (
+          <View style={styles.warningCard}>
+            <Ionicons name="warning" size={20} color="#f59e0b" />
+            <View style={styles.warningTextContainer}>
+              <Text style={styles.warningText}>
+                Microphone permission is required for voice input.
+              </Text>
+              <Text style={styles.warningSubtext}>
+                Please enable it in your device settings.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {!isApiConfigured && (
+          <View style={styles.warningCard}>
+            <Ionicons name="warning" size={20} color="#f59e0b" />
+            <View style={styles.warningTextContainer}>
+              <Text style={styles.warningText}>
+                Google Cloud API key is not configured.
+              </Text>
+              <Text style={styles.warningSubtext}>
+                Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Mic Card (boxed + centered) */}
+        {activeInputMode === "voice" && (
+          <View
+            style={[styles.voiceCard, isRecording && styles.voiceCardRecording]}
+          >
+            {/* Ripple waves container */}
+            <View style={styles.rippleContainer}>
+              <Animated.View style={[styles.ripple, ripple1Style]} />
+              <Animated.View style={[styles.ripple, ripple2Style]} />
+              <Animated.View style={[styles.ripple, ripple3Style]} />
+            </View>
+
+            {/* Animated mic button */}
+            <Animated.View style={micButtonAnimatedStyle}>
+              <TouchableOpacity
+                style={[
+                  styles.recordButton,
+                  isRecording && styles.recordButtonActive,
+                ]}
+                onPress={
+                  isRecording ? handleStopRecording : handleStartRecording
+                }
+                disabled={
+                  isProcessing || hasPermission === false || !isApiConfigured
+                }
+                activeOpacity={0.9}
+              >
+                <Ionicons
+                  name={isRecording ? "mic-off" : "mic"}
+                  size={56}
+                  color="#fff"
+                />
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Enhanced listening state text */}
+            <View style={styles.recordLabelContainer}>
+              {isRecording ? (
+                <View style={styles.listeningContainer}>
+                  <Ionicons name="radio-button-on" size={16} color="#9333ea" />
+                  <Text style={styles.recordLabelListening}>Listening</Text>
+                  <View style={styles.dotsContainer}>
+                    <Animated.View style={[styles.dot, dot1Style]} />
+                    <Animated.View style={[styles.dot, dot2Style]} />
+                    <Animated.View style={[styles.dot, dot3Style]} />
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.recordLabel}>Tap to start braindump</Text>
+              )}
+            </View>
+            <Text style={styles.recordHint}>
+              Say whatever's on your mind. No structure needed.
+            </Text>
+
+            {/* Done button - appears when recording */}
+            {isRecording && (
+              <TouchableOpacity
+                style={styles.doneButton}
+                onPress={handleStopRecording}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.doneButtonText}>Done</Text>
+              </TouchableOpacity>
+            )}
+
+            {transcript && isRecording && (
+              <View style={styles.liveTranscript}>
+                <Text style={styles.liveTranscriptText}>{transcript}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {activeInputMode === "text" && (
+          <View style={styles.textInputCard}>
+            <Text style={styles.textInputLabel}>
+              Type everything that's on your mind!
+            </Text>
+
+            <TextInput
+              style={styles.textBraindumpInput}
+              placeholder="Example: finish writing project, do CS377Q, call mom..."
+              multiline
+              value={textInput}
+              onChangeText={setTextInput}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.createButton,
+                styles.createButtonPrimary,
+                !textInput.trim() && styles.buttonDisabled,
+              ]}
+              disabled={!textInput.trim()}
+              onPress={() => parseAndCreateTasks(textInput)}
+            >
+              <Ionicons name="sparkles" size={20} color="#fff" />
+              <Text style={styles.createButtonText}>Break into tasks</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {transcript && !isProcessing && !isRecording && (
+          <View style={styles.transcriptCard}>
+            <View style={styles.transcriptContent}>
+              <Text style={styles.transcriptText}>"{transcript}"</Text>
+            </View>
+
+            <View style={styles.transcriptActions}>
+              <TouchableOpacity
+                style={[
+                  styles.createButton,
+                  styles.createButtonPrimary,
+                  isProcessing && styles.buttonDisabled,
+                ]}
+                onPress={() => parseAndCreateTasks(transcript)}
+                disabled={isProcessing}
+                activeOpacity={0.9}
+              >
+                <Ionicons name="sparkles" size={20} color="#fff" />
+                <Text style={styles.createButtonText}>Create Tasks</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.createButton, styles.createButtonSecondary]}
+                onPress={() => setTranscript("")}
+                disabled={isProcessing}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.clearButtonText}>Clear</Text>
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      )}
-
-      {hasPermission === false && (
-        <View style={styles.warningCard}>
-          <Ionicons name="warning" size={20} color="#f59e0b" />
-          <View style={styles.warningTextContainer}>
-            <Text style={styles.warningText}>Microphone permission is required for voice input.</Text>
-            <Text style={styles.warningSubtext}>Please enable it in your device settings.</Text>
-          </View>
-        </View>
-      )}
-
-      {!isApiConfigured && (
-        <View style={styles.warningCard}>
-          <Ionicons name="warning" size={20} color="#f59e0b" />
-          <View style={styles.warningTextContainer}>
-            <Text style={styles.warningText}>Google Cloud API key is not configured.</Text>
-            <Text style={styles.warningSubtext}>Please add EXPO_PUBLIC_GOOGLE_CLOUD_API_KEY to your .env file.</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Mic Card (boxed + centered) */}
-      <View style={[styles.voiceCard, isRecording && styles.voiceCardRecording]}>
-        {/* Ripple waves container */}
-        <View style={styles.rippleContainer}>
-          <Animated.View style={[styles.ripple, ripple1Style]} />
-          <Animated.View style={[styles.ripple, ripple2Style]} />
-          <Animated.View style={[styles.ripple, ripple3Style]} />
-        </View>
-
-        {/* Animated mic button */}
-        <Animated.View style={micButtonAnimatedStyle}>
-          <TouchableOpacity
-            style={[styles.recordButton, isRecording && styles.recordButtonActive]}
-            onPress={isRecording ? handleStopRecording : handleStartRecording}
-            disabled={isProcessing || hasPermission === false || !isApiConfigured}
-            activeOpacity={0.9}
-          >
-            <Ionicons name={isRecording ? "mic-off" : "mic"} size={56} color="#fff" />
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Enhanced listening state text */}
-        <View style={styles.recordLabelContainer}>
-          {isRecording ? (
-            <View style={styles.listeningContainer}>
-              <Ionicons name="radio-button-on" size={16} color="#9333ea" />
-              <Text style={styles.recordLabelListening}>Listening</Text>
-              <View style={styles.dotsContainer}>
-                <Animated.View style={[styles.dot, dot1Style]} />
-                <Animated.View style={[styles.dot, dot2Style]} />
-                <Animated.View style={[styles.dot, dot3Style]} />
-              </View>
-            </View>
-          ) : (
-            <Text style={styles.recordLabel}>Tap to start braindump</Text>
-          )}
-        </View>
-        <Text style={styles.recordHint}>
-          Say whatever's on your mind. No structure needed.
-        </Text>
-
-        {/* Done button - appears when recording */}
-        {isRecording && (
-          <TouchableOpacity
-            style={styles.doneButton}
-            onPress={handleStopRecording}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.doneButtonText}>Done</Text>
-          </TouchableOpacity>
         )}
-
-        {transcript && isRecording && (
-          <View style={styles.liveTranscript}>
-            <Text style={styles.liveTranscriptText}>{transcript}</Text>
-          </View>
-        )}
-      </View>
-
-      {transcript && !isProcessing && !isRecording && (
-        <View style={styles.transcriptCard}>
-          <View style={styles.transcriptContent}>
-            <Text style={styles.transcriptText}>"{transcript}"</Text>
-          </View>
-
-          <View style={styles.transcriptActions}>
-            <TouchableOpacity
-              style={[styles.createButton, styles.createButtonPrimary, isProcessing && styles.buttonDisabled]}
-              onPress={() => parseAndCreateTasks(transcript)}
-              disabled={isProcessing}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="sparkles" size={20} color="#fff" />
-              <Text style={styles.createButtonText}>Create Tasks</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.createButton, styles.createButtonSecondary]}
-              onPress={() => setTranscript('')}
-              disabled={isProcessing}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.clearButtonText}>Clear</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
       </ScrollView>
 
       {/* Transcribing indicator - fixed at bottom */}
@@ -620,7 +791,11 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
               <Text style={styles.reviewModalSubtitle}>
                 Tap any task to edit. Check the ones you want to add.
               </Text>
-              <TouchableOpacity onPress={cancelReview} style={styles.reviewModalClose} hitSlop={12}>
+              <TouchableOpacity
+                onPress={cancelReview}
+                style={styles.reviewModalClose}
+                hitSlop={12}
+              >
                 <Ionicons name="close" size={28} color="#374151" />
               </TouchableOpacity>
             </View>
@@ -631,19 +806,35 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
               showsVerticalScrollIndicator={false}
             >
               {pendingTasks.map((item, index) => (
-                <View key={index} style={[styles.reviewTaskRow, item.include && styles.reviewTaskRowEditable]}>
+                <View
+                  key={index}
+                  style={[
+                    styles.reviewTaskRow,
+                    item.include && styles.reviewTaskRowEditable,
+                  ]}
+                >
                   <TouchableOpacity
                     onPress={() => togglePendingTaskInclude(index)}
                     style={styles.reviewCheckbox}
                     activeOpacity={0.85}
                   >
-                    <View style={[styles.reviewCheckboxBox, item.include && styles.reviewCheckboxBoxChecked]}>
-                      {item.include && <Ionicons name="checkmark" size={16} color="#fff" />}
+                    <View
+                      style={[
+                        styles.reviewCheckboxBox,
+                        item.include && styles.reviewCheckboxBoxChecked,
+                      ]}
+                    >
+                      {item.include && (
+                        <Ionicons name="checkmark" size={16} color="#fff" />
+                      )}
                     </View>
                   </TouchableOpacity>
                   <View style={styles.reviewTaskInputWrap}>
                     <TextInput
-                      style={[styles.reviewTaskInput, !item.include && styles.reviewTaskInputDisabled]}
+                      style={[
+                        styles.reviewTaskInput,
+                        !item.include && styles.reviewTaskInputDisabled,
+                      ]}
                       value={item.title}
                       onChangeText={(t) => updatePendingTaskTitle(index, t)}
                       placeholder="Tap to edit"
@@ -653,7 +844,7 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                     />
                     {item.dueDate && (
                       <Text style={styles.reviewTaskDueLabel}>
-                        Due {format(parseISO(item.dueDate), 'MMM d')}
+                        Due {format(parseISO(item.dueDate), "MMM d")}
                       </Text>
                     )}
                   </View>
@@ -680,7 +871,11 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                   returnKeyType="done"
                 />
                 <TouchableOpacity
-                  style={[styles.reviewManualAddBtn, !manualTaskTitle.trim() && styles.reviewManualAddBtnDisabled]}
+                  style={[
+                    styles.reviewManualAddBtn,
+                    !manualTaskTitle.trim() &&
+                      styles.reviewManualAddBtnDisabled,
+                  ]}
                   onPress={addManualTask}
                   disabled={!manualTaskTitle.trim()}
                   activeOpacity={0.85}
@@ -697,7 +892,9 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
                 activeOpacity={0.85}
               >
                 <Ionicons name="add-circle" size={22} color="#fff" />
-                <Text style={styles.reviewConfirmBtnText}>Add to tasks list</Text>
+                <Text style={styles.reviewConfirmBtnText}>
+                  Add to tasks list
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -708,84 +905,89 @@ export default function BraindumpMode({ onTasksCreated, gameState }: BraindumpMo
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb', position: 'relative' },
+  container: { flex: 1, backgroundColor: "#f9fafb", position: "relative" },
   scrollView: { flex: 1 },
   content: { padding: 16, gap: 16, paddingBottom: 80 },
 
   avatarCard: {
-    backgroundColor: '#ede9fe',
+    backgroundColor: "#ede9fe",
     borderRadius: 16,
     padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
-  messageBox: { flex: 1, backgroundColor: '#fff', borderRadius: 16, padding: 12 },
-  messageText: { fontSize: 14, color: '#1f2937' },
+  messageBox: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 12,
+  },
+  messageText: { fontSize: 14, color: "#1f2937" },
 
   voiceCard: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 32,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 16,
-    position: 'relative',
-    overflow: 'hidden',
+    position: "relative",
+    overflow: "hidden",
   },
   voiceCardRecording: {
-    backgroundColor: '#f5f3ff',
+    backgroundColor: "#f5f3ff",
     borderWidth: 2,
-    borderColor: '#e9d5ff',
+    borderColor: "#e9d5ff",
   },
   rippleContainer: {
-    position: 'absolute',
+    position: "absolute",
     width: 128,
     height: 128,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     top: 32,
   },
   ripple: {
-    position: 'absolute',
+    position: "absolute",
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
   },
   recordButton: {
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: '#9333ea',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
+    backgroundColor: "#9333ea",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
     zIndex: 10,
   },
-  recordButtonActive: { backgroundColor: '#9333ea' },
+  recordButtonActive: { backgroundColor: "#9333ea" },
   recordLabelContainer: {
     minHeight: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  recordLabel: { fontSize: 18, fontWeight: '600', color: '#1f2937' },
+  recordLabel: { fontSize: 18, fontWeight: "600", color: "#1f2937" },
   listeningContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   recordLabelListening: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#9333ea',
+    fontWeight: "700",
+    color: "#9333ea",
   },
   dotsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     marginLeft: 4,
   },
@@ -793,120 +995,183 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#9333ea',
+    backgroundColor: "#9333ea",
   },
   doneButton: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: "#f3f4f6",
     borderWidth: 1.5,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginTop: 8,
   },
   doneButtonText: {
-    color: '#6b7280',
+    color: "#6b7280",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
-  recordHint: { fontSize: 14, color: '#6b7280', textAlign: 'center' },
+  recordHint: { fontSize: 14, color: "#6b7280", textAlign: "center" },
 
-  transcriptCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, gap: 12 },
+  transcriptCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
   transcriptContent: { marginBottom: 12 },
-  transcriptText: { fontSize: 16, color: '#374151', fontStyle: 'italic' },
+  transcriptText: { fontSize: 16, color: "#374151", fontStyle: "italic" },
 
-  transcriptActions: { flexDirection: 'row', gap: 8 },
+  transcriptActions: { flexDirection: "row", gap: 8 },
   createButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
     flex: 1,
   },
-  createButtonPrimary: { backgroundColor: '#9333ea' },
+  createButtonPrimary: { backgroundColor: "#9333ea" },
   createButtonSecondary: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: "#f3f4f6",
     borderWidth: 1.5,
-    borderColor: '#d1d5db',
+    borderColor: "#d1d5db",
   },
-  createButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  clearButtonText: { color: '#6b7280', fontSize: 16, fontWeight: '600' },
+  createButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  clearButtonText: { color: "#6b7280", fontSize: 16, fontWeight: "600" },
   buttonDisabled: { opacity: 0.6 },
 
   errorCard: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: "#fef2f2",
     borderWidth: 1,
-    borderColor: '#fecaca',
+    borderColor: "#fecaca",
     borderRadius: 16,
     padding: 12,
   },
-  errorContent: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  errorContent: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   errorTextContainer: { flex: 1 },
-  errorText: { fontSize: 14, color: '#991b1b', fontWeight: '500' },
-  errorDismiss: { fontSize: 12, color: '#dc2626', marginTop: 4, textDecorationLine: 'underline' },
+  errorText: { fontSize: 14, color: "#991b1b", fontWeight: "500" },
+  errorDismiss: {
+    fontSize: 12,
+    color: "#dc2626",
+    marginTop: 4,
+    textDecorationLine: "underline",
+  },
 
   warningCard: {
-    backgroundColor: '#fffbeb',
+    backgroundColor: "#fffbeb",
     borderWidth: 1,
-    borderColor: '#fde68a',
+    borderColor: "#fde68a",
     borderRadius: 16,
     padding: 12,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 12,
   },
   warningTextContainer: { flex: 1 },
-  warningText: { fontSize: 14, color: '#92400e', fontWeight: '500' },
-  warningSubtext: { fontSize: 12, color: '#a16207', marginTop: 4 },
+  warningText: { fontSize: 14, color: "#92400e", fontWeight: "500" },
+  warningSubtext: { fontSize: 12, color: "#a16207", marginTop: 4 },
 
   infoCard: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: "#eff6ff",
     borderWidth: 1,
-    borderColor: '#bfdbfe',
+    borderColor: "#bfdbfe",
     borderRadius: 16,
     padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
-  infoText: { fontSize: 14, color: '#1e40af' },
+  infoText: { fontSize: 14, color: "#1e40af" },
   transcribingIndicator: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#eff6ff',
+    backgroundColor: "#eff6ff",
     borderTopWidth: 1,
-    borderTopColor: '#bfdbfe',
+    borderTopColor: "#bfdbfe",
     paddingVertical: 12,
     paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 12,
     zIndex: 100,
   },
-  transcribingText: { fontSize: 14, color: '#1e40af', fontWeight: '500' },
+  transcribingText: { fontSize: 14, color: "#1e40af", fontWeight: "500" },
+
+  inputModeTabs: {
+    flexDirection: "row",
+    backgroundColor: "#ede9fe",
+    borderRadius: 12,
+    padding: 4,
+  },
+
+  inputTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+
+  inputTabActive: {
+    backgroundColor: "#9333ea",
+  },
+
+  inputTabText: {
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+
+  inputTabTextActive: {
+    color: "#fff",
+  },
+
+  textInputCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    gap: 12,
+  },
+
+  textBraindumpInput: {
+    minHeight: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    padding: 12,
+    fontSize: 16,
+    textAlignVertical: "top",
+  },
+
+  textInputLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#374151",
+  },
 
   reviewModalBackdrop: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
     padding: 24,
   },
   reviewModalCard: {
-    width: '96%',
-    height: '96%',
+    width: "96%",
+    height: "96%",
     maxHeight: 700,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 20,
-    overflow: 'hidden',
+    overflow: "hidden",
     margin: 12,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 24,
@@ -914,34 +1179,34 @@ const styles = StyleSheet.create({
   },
   reviewModalContainer: {
     flex: 1,
-    backgroundColor: '#f5f3ff',
+    backgroundColor: "#f5f3ff",
   },
   reviewModalHeader: {
     paddingTop: 24,
     paddingHorizontal: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e9d5ff',
-    backgroundColor: 'white',
+    borderBottomColor: "#e9d5ff",
+    backgroundColor: "white",
   },
   reviewModalTitle: {
     fontSize: 24,
-    fontWeight: '700',
-    color: '#5b21b6',
+    fontWeight: "700",
+    color: "#5b21b6",
     marginBottom: 6,
   },
   reviewModalSubtitle: {
     fontSize: 15,
-    color: '#6b21a8',
+    color: "#6b21a8",
     lineHeight: 22,
     paddingRight: 20,
   },
   reviewModalClose: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     right: 16,
     padding: 6,
-    paddingTop: 12
+    paddingTop: 12,
   },
   reviewModalScroll: { flex: 1 },
   reviewModalScrollContent: {
@@ -952,51 +1217,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: '#e9d5ff',
-    backgroundColor: '#ede9fe',
+    borderTopColor: "#e9d5ff",
+    backgroundColor: "#ede9fe",
   },
-  reviewManualAddLabel: { fontSize: 14, fontWeight: '600', color: '#5b21b6', marginBottom: 10 },
-  reviewManualAddRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewManualAddLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#5b21b6",
+    marginBottom: 10,
+  },
+  reviewManualAddRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   reviewManualAddInput: {
     flex: 1,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#fff',
+    color: "#111827",
+    backgroundColor: "#fff",
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#e9d5ff',
+    borderColor: "#e9d5ff",
   },
   reviewManualAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    backgroundColor: '#9333ea',
+    backgroundColor: "#9333ea",
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
     minHeight: 48,
   },
-  reviewManualAddBtnDisabled: { backgroundColor: '#c4b5fd', opacity: 0.8 },
-  reviewManualAddBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  reviewManualAddBtnDisabled: { backgroundColor: "#c4b5fd", opacity: 0.8 },
+  reviewManualAddBtnText: { fontSize: 16, fontWeight: "600", color: "#fff" },
   reviewTaskRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
     marginBottom: 12,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e9d5ff',
+    borderColor: "#e9d5ff",
   },
   reviewTaskRowEditable: {
     borderLeftWidth: 3,
-    borderLeftColor: '#9333ea',
-    backgroundColor: '#ede9fe',
+    borderLeftColor: "#9333ea",
+    backgroundColor: "#ede9fe",
   },
   reviewCheckbox: { padding: 4 },
   reviewCheckboxBox: {
@@ -1004,29 +1274,29 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#c4b5fd',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "#c4b5fd",
+    alignItems: "center",
+    justifyContent: "center",
   },
   reviewCheckboxBoxChecked: {
-    backgroundColor: '#9333ea',
-    borderColor: '#9333ea',
+    backgroundColor: "#9333ea",
+    borderColor: "#9333ea",
   },
   reviewTaskInputWrap: { flex: 1 },
   reviewTaskInput: {
     flex: 1,
     fontSize: 16,
-    color: '#111827',
+    color: "#111827",
     paddingVertical: 8,
     paddingHorizontal: 0,
     minHeight: 44,
   },
   reviewTaskInputDisabled: {
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
   reviewTaskDueLabel: {
     fontSize: 12,
-    color: '#6b7280',
+    color: "#6b7280",
     marginTop: 2,
   },
   reviewRowCloseBtn: { padding: 4 },
@@ -1035,31 +1305,36 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: 20,
     borderTopWidth: 1,
-    borderTopColor: '#e9d5ff',
-    backgroundColor: 'white',
+    borderTopColor: "#e9d5ff",
+    backgroundColor: "white",
   },
   reviewConfirmBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    alignSelf: 'stretch',
+    alignSelf: "stretch",
     paddingVertical: 12,
     paddingHorizontal: 16,
     minHeight: 48,
     borderRadius: 12,
-    backgroundColor: '#9333ea',
+    backgroundColor: "#9333ea",
   },
-  reviewConfirmBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  reviewConfirmBtnText: { fontSize: 16, fontWeight: "600", color: "#fff" },
 
   liveTranscript: {
     marginTop: 16,
     padding: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: "#f9fafb",
     borderRadius: 12,
     maxHeight: 120,
-    width: '100%',
+    width: "100%",
   },
-  liveTranscriptText: { fontSize: 14, color: '#374151', fontStyle: 'italic' },
-  liveTranscriptInterim: { fontSize: 14, color: '#9ca3af', fontStyle: 'italic', marginTop: 4 },
+  liveTranscriptText: { fontSize: 14, color: "#374151", fontStyle: "italic" },
+  liveTranscriptInterim: {
+    fontSize: 14,
+    color: "#9ca3af",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
 });
