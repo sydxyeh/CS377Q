@@ -44,6 +44,7 @@ import {
   speakAvatarMessageIfSet,
   stopAvatarSpeech,
 } from "../services/avatarSpeech";
+import { isTaskUnsafe } from "../services/taskSafety";
 import { format, parseISO } from "date-fns";
 
 interface BraindumpModeProps {
@@ -72,14 +73,22 @@ export default function BraindumpMode({
     { title: string; include: boolean; dueDate?: string }[]
   >([]);
   const [manualTaskTitle, setManualTaskTitle] = useState("");
+  const [safetyAlertVisible, setSafetyAlertVisible] = useState(false);
+  const [blockedTaskCount, setBlockedTaskCount] = useState(0);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const transcriptionQueueRef = useRef<string[]>([]);
   const isTranscribingRef = useRef(false);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSafetyCheckedTranscriptRef = useRef("");
 
   // ✅ guard against double "Create Tasks" presses / queued taps
   const processingRef = useRef(false);
+
+  const showSafetyAlert = (count: number) => {
+    setBlockedTaskCount(count);
+    setSafetyAlertVisible(true);
+  };
 
   // Animation values for pulsing mic button
   const micButtonScale = useSharedValue(1);
@@ -266,6 +275,21 @@ export default function BraindumpMode({
     };
   }, []);
 
+  useEffect(() => {
+    if (isRecording || isTranscribing) return;
+
+    const normalizedTranscript = transcript.trim();
+    if (!normalizedTranscript) return;
+    if (normalizedTranscript === lastSafetyCheckedTranscriptRef.current) return;
+
+    lastSafetyCheckedTranscriptRef.current = normalizedTranscript;
+    if (isTaskUnsafe(normalizedTranscript)) {
+      showSafetyAlert(1);
+      setPendingTasks([]);
+      setReviewTasksVisible(false);
+    }
+  }, [transcript, isRecording, isTranscribing]);
+
   const processTranscriptionQueue = useCallback(async () => {
     if (isTranscribingRef.current || transcriptionQueueRef.current.length === 0)
       return;
@@ -322,6 +346,7 @@ export default function BraindumpMode({
 
     setError(null);
     setTranscript("");
+    lastSafetyCheckedTranscriptRef.current = "";
     transcriptionQueueRef.current = [];
 
     try {
@@ -409,37 +434,69 @@ export default function BraindumpMode({
 
   const parseAndCreateTasks = async (text: string) => {
     if (processingRef.current) return;
+    const rawInput = text.trim();
+    if (!rawInput) return;
+
+    // Local fast-path safety check so dangerous requests are blocked immediately.
+    if (isTaskUnsafe(rawInput)) {
+      showSafetyAlert(1);
+      setPendingTasks([]);
+      setReviewTasksVisible(false);
+      return;
+    }
+
     processingRef.current = true;
     setIsProcessing(true);
 
     try {
       const withDue = await transcriptToTaskTitlesWithDueDates(text);
       if (withDue.length > 0) {
-        setPendingTasks(
-          withDue.map((item) => ({
-            title: item.title.trim() || "Untitled task",
-            include: true,
-            dueDate: item.dueDate,
-          })),
-        );
+        const parsedTasks = withDue.map((item) => ({
+          title: item.title.trim() || "Untitled task",
+          include: true,
+          dueDate: item.dueDate,
+        }));
+        const safeTasks = parsedTasks.filter((item) => !isTaskUnsafe(item.title));
+        const blockedCount = parsedTasks.length - safeTasks.length;
+        if (blockedCount > 0) showSafetyAlert(blockedCount);
+        if (safeTasks.length === 0) {
+          setPendingTasks([]);
+          setReviewTasksVisible(false);
+          return;
+        }
+        setPendingTasks(safeTasks);
       } else {
         const list = fallbackParseTitles(text);
-        setPendingTasks(
-          list.map((title) => ({
-            title: title.trim() || "Untitled task",
-            include: true,
-          })),
-        );
+        const parsedTasks = list.map((title) => ({
+          title: title.trim() || "Untitled task",
+          include: true,
+        }));
+        const safeTasks = parsedTasks.filter((item) => !isTaskUnsafe(item.title));
+        const blockedCount = parsedTasks.length - safeTasks.length;
+        if (blockedCount > 0) showSafetyAlert(blockedCount);
+        if (safeTasks.length === 0) {
+          setPendingTasks([]);
+          setReviewTasksVisible(false);
+          return;
+        }
+        setPendingTasks(safeTasks);
       }
       setReviewTasksVisible(true);
     } catch (_) {
       const list = fallbackParseTitles(text);
-      setPendingTasks(
-        list.map((title) => ({
-          title: title.trim() || "Untitled task",
-          include: true,
-        })),
-      );
+      const parsedTasks = list.map((title) => ({
+        title: title.trim() || "Untitled task",
+        include: true,
+      }));
+      const safeTasks = parsedTasks.filter((item) => !isTaskUnsafe(item.title));
+      const blockedCount = parsedTasks.length - safeTasks.length;
+      if (blockedCount > 0) showSafetyAlert(blockedCount);
+      if (safeTasks.length === 0) {
+        setPendingTasks([]);
+        setReviewTasksVisible(false);
+        return;
+      }
+      setPendingTasks(safeTasks);
       setReviewTasksVisible(true);
     } finally {
       setIsProcessing(false);
@@ -464,14 +521,19 @@ export default function BraindumpMode({
   };
 
   const confirmAddTasks = () => {
-    const toAdd = pendingTasks.filter((p) => p.include && p.title.trim());
-    if (toAdd.length === 0) {
+    const selected = pendingTasks.filter((p) => p.include && p.title.trim());
+    if (selected.length === 0) {
       Alert.alert(
         "No tasks selected",
         "Select at least one task or edit the titles.",
       );
       return;
     }
+    const toAdd = selected.filter((p) => !isTaskUnsafe(p.title.trim()));
+    const blockedCount = selected.length - toAdd.length;
+    if (blockedCount > 0) showSafetyAlert(blockedCount);
+    if (toAdd.length === 0) return;
+
     const tasks: Task[] = toAdd.map((p, i) => ({
       id: `task-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
       title: p.title.trim(),
@@ -495,6 +557,10 @@ export default function BraindumpMode({
   const addManualTask = () => {
     const title = manualTaskTitle.trim();
     if (!title) return;
+    if (isTaskUnsafe(title)) {
+      showSafetyAlert(1);
+      return;
+    }
     setPendingTasks((prev) => [...prev, { title, include: true }]);
     setManualTaskTitle("");
   };
@@ -772,6 +838,43 @@ export default function BraindumpMode({
           <Text style={styles.transcribingText}>Transcribing audio...</Text>
         </View>
       )}
+
+      <Modal
+        visible={safetyAlertVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSafetyAlertVisible(false)}
+      >
+        <View style={styles.safetyModalBackdrop}>
+          <View style={styles.safetyModalCard}>
+            <View style={styles.safetyIconWrap}>
+              <Ionicons name="shield-checkmark" size={28} color="#fff" />
+            </View>
+            <Text style={styles.safetyTitle}>Task blocked for safety</Text>
+            <Text style={styles.safetyMessage}>
+              I cannot add{" "}
+              {blockedTaskCount === 1 ? "this task" : "these tasks"} because it
+              could harm you or someone else.
+            </Text>
+            <Text style={styles.safetySubMessage}>
+              Please reconsider and choose a safer task.
+            </Text>
+            <View style={styles.safetyHotlineBox}>
+              <Ionicons name="call" size={16} color="#7c3aed" />
+              <Text style={styles.safetyHotlineText}>
+                Need support now? Contact the 988 Suicide & Crisis Lifeline.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.safetyButton}
+              onPress={() => setSafetyAlertVisible(false)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.safetyButtonText}>I understand</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={reviewTasksVisible}
@@ -1102,6 +1205,89 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   transcribingText: { fontSize: 14, color: "#1e40af", fontWeight: "500" },
+  safetyModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17,24,39,0.48)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  safetyModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "#fbcfe8",
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  safetyIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#9333ea",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  safetyTitle: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: "#4c1d95",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  safetyMessage: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: "#374151",
+    textAlign: "center",
+  },
+  safetySubMessage: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: "#6b7280",
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  safetyHotlineBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#f5f3ff",
+    borderWidth: 1,
+    borderColor: "#ddd6fe",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  safetyHotlineText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5b21b6",
+    fontWeight: "600",
+  },
+  safetyButton: {
+    backgroundColor: "#9333ea",
+    borderRadius: 12,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  safetyButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
 
   inputModeTabs: {
     flexDirection: "row",
