@@ -1855,9 +1855,7 @@ export default function TaskList({
                     onPress={() => setPendingVoiceEdits(null)}
                     activeOpacity={0.85}
                   >
-                    <Text style={styles.voiceConfirmRerecordText}>
-                      Re-record
-                    </Text>
+                    <Text style={styles.voiceConfirmRerecordText}>Redo</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.voiceConfirmApplyButton}
